@@ -1,0 +1,21 @@
+pin 8-9-10-11 is portb
+
+
+
+
+
+COM_reg
+bit0
+bit1
+bit2
+bit3
+bit4
+bit5
+bit6
+bit7
+
+MOT_mode
+0=stop
+1=rechtom
+2=linksom
+
