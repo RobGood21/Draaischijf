@@ -1,5 +1,5 @@
 pin 8-9-10-11 is portb
-
+rode knop linksom, zwart rechtom
 
 
 
