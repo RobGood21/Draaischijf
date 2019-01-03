@@ -5,7 +5,7 @@ rode knop linksom, zwart rechtom
 
 
 COM_reg
-bit0
+bit0 only accept reset, after direction command true 
 bit1
 bit2
 bit3

@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Draaischijf", "Draaischijf\
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DeKoder", "DeKoder\DeKoder.vcxproj", "{ADFDEA24-9D33-4FE9-9BF3-3177C7DEA20E}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WMServo", "WMServo\WMServo.vcxproj", "{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
@@ -21,6 +23,10 @@ Global
 		{ADFDEA24-9D33-4FE9-9BF3-3177C7DEA20E}.Debug|x86.Build.0 = Debug|Win32
 		{ADFDEA24-9D33-4FE9-9BF3-3177C7DEA20E}.Release|x86.ActiveCfg = Release|Win32
 		{ADFDEA24-9D33-4FE9-9BF3-3177C7DEA20E}.Release|x86.Build.0 = Release|Win32
+		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Debug|x86.ActiveCfg = Debug|Win32
+		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Debug|x86.Build.0 = Debug|Win32
+		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Release|x86.ActiveCfg = Release|Win32
+		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

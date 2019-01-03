@@ -13,14 +13,17 @@ byte DEK_Reg; //register voor de decoder
 byte DEK_Status = 0;
 byte DEK_byteRX[6]; //max length commandoos for this decoder 6 bytes (5x data 1x error check)
 byte DEK_countPA = 0; //counter for preample
-byte DEK_BufReg[12]; //registerbyte for 12 command buffers, can be lowered.
-byte DEK_Buf0[12];
-byte DEK_Buf1[12];
-byte DEK_Buf2[12];
-byte DEK_Buf3[12];
-byte DEK_Buf4[12];
-byte DEK_Buf5[12];
+byte DEK_BufReg[6]; //registerbyte for 12 command buffers, can be lowered.
+byte DEK_Buf0[6];
+byte DEK_Buf1[6];
+byte DEK_Buf2[6];
+byte DEK_Buf3[6];
+byte DEK_Buf4[6];
+byte DEK_Buf5[6];
 //**End declaration for deKoder
+
+//DCC adres in this version NOT programmable because project is only for private model railroad layout, can be set by setting value of DCCadres
+#define DCCadres 29  //used are 29-2 29-3 29-4 adresses 30-32
 
 unsigned long SW_time;
 //unsigned long SW_periode;
@@ -113,26 +116,27 @@ void SW_cl() {
 				switch (i) {
 				case 0:
 					//schijf linksom (rood)
-					MOT_mode = 1;
+					
 					POS_rq = POS_last - 1;
 					if (POS_rq < 1 | POS_rq > 7)POS_rq = 7;
 					if (POS_rq == 6)POS_rq = 5;
+					ST_start(1);
+
 					break;
 				case 1:
 					//schijf stop
 					ST_stop();
-					
+
 					break;
 				case 2:
 					//schijf rechtom (zwart)
-					MOT_mode = 2;
+				
 					POS_rq = POS_last + 1;
 					if (POS_rq == 6)POS_rq = 7;
 					if (POS_rq > 7)POS_rq = 1;
+					ST_start(2);
 					break;
 				}
-				Serial.print("request: ");
-				Serial.println(POS_rq);
 			}
 		}
 		changed = changed >> 3;
@@ -145,11 +149,30 @@ void SW_cl() {
 	portc = PINC;
 }
 void ST_stop() {
-MOT_mode = 0;
-ST_clear();
+	MOT_mode = 0;
+	ST_clear();
+}
+void ST_start(byte direction) {
+	//true==right, false=left
+
+	Serial.print("request: ");
+	Serial.println(POS_rq);
+	Serial.println(direction);
+	switch (direction) {
+	case 0: //stop
+		ST_stop();
+		break;
+	case 1: //turn right
+		MOT_mode = 1;
+		break;
+	case 2: //turn left
+		MOT_mode = 2;
+		break;
+	}
+
 }
 void ST_position() {
-	Serial.println(POS_cur);
+	//Serial.println(POS_cur);
 	if (MOT_mode > 0) {
 		if (POS_cur > 0) {
 			if (POS_cur == POS_rq) ST_stop();
@@ -445,7 +468,7 @@ void DEK_DCCh() { //handles incoming DCC commands, called from loop()
 		DEK_Buf5[n] = 0;
 	}
 	n++;
-	if (n > 12)n = 0;
+	if (n > 6)n = 0;
 }
 void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
 	//type=CV(true) or switch(false)
@@ -458,8 +481,8 @@ void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff
 	int adres;
 	adres = ((decoder - 1) * 4) + channel;
 	//Applications 
-	APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
-
+	//APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
+	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
 	//Add a void like APP_monitor for application
 }
 void APP_Monitor(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
@@ -501,8 +524,61 @@ void APP_Monitor(boolean type, int adres, int decoder, int channel, boolean port
 	Serial.println("");
 }
 //**End void's for DeKoder
+void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
+	/*
+	DCC command station sends many commands and rehearsels of commands, much effort is needed to clean this up. To get a solid sequence of commands.
+	*/
+	static byte check;
+	byte received;
+
+	if (decoder == 8) {
+		received = type + adres + channel + port;
+		if ((check ^ received) > 0) {
+			check = received;
+			switch (adres) {
+			case 30:
+				if (bitRead(COM_reg, 0) == false) {
 
 
+					if (port == false) {
+						Serial.println("reset");
+						POS_rq = 0;
+						COM_reg |= (1 << 0);
+					}
+				}
+				else {
+					if (bitRead(COM_reg, 0) == true) POS_rq |= (1 << 0);
+				}
+				break;
+			case 31:
+
+				if (port == false) {
+					if (bitRead(COM_reg, 0) == true)POS_rq |= (1 << 1);
+				}
+				else {
+					if (bitRead(COM_reg, 0) == true)POS_rq |= (1 << 2);
+				}
+
+				break;
+			case 32:
+				if (bitRead(COM_reg, 0) == true) {
+					COM_reg &= ~(1 << 0);
+
+					//Serial.println(POS_rq);
+					if (port == true) {
+						ST_start(1);
+					}
+					else {
+						ST_start(2);
+					}	
+				}
+				break;
+			}
+
+		}
+
+	}
+}
 void loop() {
 	//**place in loop for DeKoder
 	DEK_DCCh();
@@ -511,11 +587,11 @@ void loop() {
 	if (millis() - MOT_time > 5) {
 		MOT_time = millis();
 		if (MOT_mode != 0) ST_step();
-		}
-	
+	}
+
 
 	if (millis() - SW_time > 20) {
 		SW_time = millis();
-		SW_cl();		
+		SW_cl();
 	}
 }
