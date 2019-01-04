@@ -7,6 +7,8 @@
  Program to control a servo from Arduino (for start only one...)
  Servo on pin 7
 
+ program lets servo swipe 10 times then stops.
+
 */
 byte SERVO_reg = 0;
 

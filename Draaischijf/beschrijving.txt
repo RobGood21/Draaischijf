@@ -19,3 +19,12 @@ MOT_mode
 1=rechtom
 2=linksom
 
+SERVO_reg
+bit0 timer servo puls
+bit1 timer servo speed (not used in 'draaischijf')
+bit2 servo run true, stop false
+bit3
+bit4
+bit5
+bit6
+bit7

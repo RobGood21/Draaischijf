@@ -22,6 +22,18 @@ byte DEK_Buf4[6];
 byte DEK_Buf5[6];
 //**End declaration for deKoder
 
+//**declaration for SERVO
+byte SERVO_reg = 0;
+
+unsigned long SERVO_stoptime;
+unsigned long SERVO_time;
+unsigned int SERVO_pos;
+unsigned long SERVO_clock;
+unsigned int SERVO_min=600;
+unsigned int SERVO_max=2200;
+
+
+
 //DCC adres in this version NOT programmable because project is only for private model railroad layout, can be set by setting value of DCCadres
 #define DCCadres 29  //used are 29-2 29-3 29-4 adresses 30-32
 
@@ -48,6 +60,8 @@ void setup() {
 	EIMSK |= (1 << INT0);//External Interrupt Mask Register bit0 INT0 > 1
 	//**End Setup for DeKoder
 
+	//**for servo
+	DDRD |= (1 << 7); //set PIN7 as output
 
 	DDRB = 0xFF;
 	DDRC = 0x00; //port C as input
@@ -105,7 +119,6 @@ void ST_step() {
 	}
 }
 void SW_cl() {
-
 	byte changed;
 	byte pos;
 	changed = (PINC^portc);
@@ -121,12 +134,14 @@ void SW_cl() {
 					if (POS_rq < 1 | POS_rq > 7)POS_rq = 7;
 					if (POS_rq == 6)POS_rq = 5;
 					ST_start(1);
-
 					break;
 				case 1:
 					//schijf stop
-					ST_stop();
-
+					//ST_stop(); cannot be used because of closing servo
+					//manual stop opens servo emergency stop
+					MOT_mode = 0; //stops stepper
+					ST_clear; //sets coils of stepper off
+					SERVO_open();
 					break;
 				case 2:
 					//schijf rechtom (zwart)
@@ -149,8 +164,10 @@ void SW_cl() {
 	portc = PINC;
 }
 void ST_stop() {
+
 	MOT_mode = 0;
 	ST_clear();
+	SERVO_close();
 }
 void ST_start(byte direction) {
 	//true==right, false=left
@@ -158,6 +175,7 @@ void ST_start(byte direction) {
 	Serial.print("request: ");
 	Serial.println(POS_rq);
 	Serial.println(direction);
+	SERVO_open();
 	switch (direction) {
 	case 0: //stop
 		ST_stop();
@@ -579,16 +597,51 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 
 	}
 }
+void SERVO_close() {
+	SERVO_pos = SERVO_max;
+	SERVO_reg |= (1 << 2);
+	SERVO_stoptime = millis();
+}
+
+void SERVO_open() {
+	SERVO_pos = SERVO_min;
+	SERVO_reg |= (1 << 2);
+	SERVO_stoptime = millis();
+}
+
+void SERVO_run() {
+	//SERVO_speed();
+	if (bitRead(SERVO_reg, 0) == false) {
+		if (millis() - SERVO_clock > 20) { //runs on 50HZ
+			SERVO_clock = millis();
+			SERVO_reg |= (1 << 0);
+			SERVO_time = micros();
+			//set pin7 high PORTD 7
+			PORTD |= (1 << 7);
+		}
+	}
+	else {
+		if (micros() - SERVO_time > SERVO_pos) {
+			PORTD &= ~(1 << 7); // set pin 7 low
+			SERVO_reg &= ~(1 << 0);
+		}
+	}
+}
+
+
 void loop() {
 	//**place in loop for DeKoder
 	DEK_DCCh();
 	//**end Loop DeKoder
+	if (bitRead(SERVO_reg, 2) == true) {
+		SERVO_run();
+		if (millis() - SERVO_stoptime > 1000) SERVO_reg &= ~(1 << 2);
+	}
 
 	if (millis() - MOT_time > 5) {
 		MOT_time = millis();
-		if (MOT_mode != 0) ST_step();
+		if (MOT_mode > 0 & bitRead(SERVO_reg,2)==false) ST_step();
 	}
-
 
 	if (millis() - SW_time > 20) {
 		SW_time = millis();
