@@ -6,10 +6,10 @@ rode knop linksom, zwart rechtom
 
 COM_reg
 bit0 only accept reset, after direction command true 
-bit1
-bit2
-bit3
-bit4
+bit1 boolean direction 
+bit2 correction in progress
+bit3 s88 clear bridge timer on
+bit4 Initialising bit set in setup
 bit5
 bit6
 bit7

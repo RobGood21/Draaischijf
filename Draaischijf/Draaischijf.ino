@@ -29,8 +29,8 @@ unsigned long SERVO_stoptime;
 unsigned long SERVO_time;
 unsigned int SERVO_pos;
 unsigned long SERVO_clock;
-unsigned int SERVO_min=600;
-unsigned int SERVO_max=2200;
+unsigned int SERVO_min = 1500;//unlocked
+unsigned int SERVO_max = 900;//locked
 
 
 
@@ -45,6 +45,7 @@ unsigned long MOT_time;
 byte POS_last; //last posion on place
 byte POS_cur; // current position
 byte POS_rq; //requested position
+byte S88_ct;
 byte fase;
 byte portc;
 
@@ -62,10 +63,16 @@ void setup() {
 
 	//**for servo
 	DDRD |= (1 << 7); //set PIN7 as output
+	PORTD |= (1 << 7); //set servo port high
+	DDRD |= (1 << 6); //set PIN6 as output for S88 control
 
-	DDRB = 0xFF;
+
+	DDRB = 0xFF; //port B as output
 	DDRC = 0x00; //port C as input
 	PORTC |= (1 << 0); PORTC |= (1 << 1); PORTC |= (1 << 2); //pins A0 -A2 set pullup resister
+
+	COM_reg |= (1 << 4);//set for initialising
+
 }
 
 void ST_clear() {
@@ -129,7 +136,7 @@ void SW_cl() {
 				switch (i) {
 				case 0:
 					//schijf linksom (rood)
-					
+
 					POS_rq = POS_last - 1;
 					if (POS_rq < 1 | POS_rq > 7)POS_rq = 7;
 					if (POS_rq == 6)POS_rq = 5;
@@ -140,12 +147,16 @@ void SW_cl() {
 					//ST_stop(); cannot be used because of closing servo
 					//manual stop opens servo emergency stop
 					MOT_mode = 0; //stops stepper
-					ST_clear; //sets coils of stepper off
+					ST_clear(); //sets coils of stepper off
 					SERVO_open();
+					//alleen tijdens testen, s88 brug vrij geven
+					S88_lock(false);
+
+
 					break;
 				case 2:
 					//schijf rechtom (zwart)
-				
+
 					POS_rq = POS_last + 1;
 					if (POS_rq == 6)POS_rq = 7;
 					if (POS_rq > 7)POS_rq = 1;
@@ -157,6 +168,15 @@ void SW_cl() {
 		changed = changed >> 3;
 		if (changed > 0) {
 			POS_cur = PINC >> 3;
+			if (bitRead(COM_reg, 4) == true) { //during start-up
+				COM_reg &= ~(1 << 4); //reset init
+				if (POS_cur > 0) {
+					POS_rq = POS_cur;
+				}
+				else {
+					POS_rq = 4;
+				}							
+			}			
 			if (POS_cur > 0)POS_last = POS_cur;
 			ST_position();
 		}
@@ -164,7 +184,6 @@ void SW_cl() {
 	portc = PINC;
 }
 void ST_stop() {
-
 	MOT_mode = 0;
 	ST_clear();
 	SERVO_close();
@@ -175,6 +194,8 @@ void ST_start(byte direction) {
 	Serial.print("request: ");
 	Serial.println(POS_rq);
 	Serial.println(direction);
+	COM_reg &= ~(1 << 3); //lock S88
+	S88_lock(true);
 	SERVO_open();
 	switch (direction) {
 	case 0: //stop
@@ -182,9 +203,11 @@ void ST_start(byte direction) {
 		break;
 	case 1: //turn right
 		MOT_mode = 1;
+		COM_reg |= (1 << 1); //set direction memory
 		break;
 	case 2: //turn left
 		MOT_mode = 2;
+		COM_reg &= ~(1 << 1); //clear direction memory
 		break;
 	}
 
@@ -193,12 +216,47 @@ void ST_position() {
 	//Serial.println(POS_cur);
 	if (MOT_mode > 0) {
 		if (POS_cur > 0) {
-			if (POS_cur == POS_rq) ST_stop();
+			if (POS_cur == POS_rq) { //reached correct position
+				ST_stop();
+				COM_reg &= ~(1 << 2); //reset correction bit
+				COM_reg |= (1 << 3); //set timer for S88 clear
+				S88_ct = 0;
+			}
+			else {
+				if (bitRead(COM_reg, 2) == true) {
+					//in this case only possible situation is that the bridge turns wrong direction to make correction, so change direction.
+					COM_reg ^= (1 << 1); //toggle direction memory
+					if (bitRead(COM_reg, 1) == true) {
+						ST_start(1);
+					}
+					else {
+						ST_start(2);
+					}
+				}
+			}
 		}
 	}
 	else {
-		//positie verandert zonder dat de schrijf draait, hier een foutafhandeling maken. 
+		/*
+		positie verandert zonder dat de schrijf draait, hier een foutafhandeling maken.
+		stel servo mist de walllock dan krijgen we hier een nieuwe ongewenste positie
+		eerst de servo terugtrekken,
+		Correctie bit com_reg bit 2 zetten
+		daarna draairichting omkeren en herstarten
+
+*/
 		Serial.println("positie veranderd zonder beweging");
+		SERVO_open();
+		COM_reg |= (1 << 2); //set correction bit
+		COM_reg ^= (1 << 1); //toggle direction memory
+		COM_reg &= ~(1 << 3);//reset S88 timer clear
+
+		if (bitRead(COM_reg, 1) == true) {
+			ST_start(1);
+		}
+		else {
+			ST_start(2);
+		}
 	}
 }
 
@@ -588,7 +646,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 					}
 					else {
 						ST_start(2);
-					}	
+					}
 				}
 				break;
 			}
@@ -596,6 +654,17 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 		}
 
 	}
+}
+
+void S88_lock(boolean lock) {
+	//set pin 6 for S88 control
+	if (lock == true) {
+		PORTD |= (1 << 6);
+	}
+	else {
+		PORTD &= ~(1 << 6);
+	}
+
 }
 void SERVO_close() {
 	SERVO_pos = SERVO_max;
@@ -627,24 +696,29 @@ void SERVO_run() {
 		}
 	}
 }
-
-
 void loop() {
 	//**place in loop for DeKoder
 	DEK_DCCh();
 	//**end Loop DeKoder
 	if (bitRead(SERVO_reg, 2) == true) {
 		SERVO_run();
-		if (millis() - SERVO_stoptime > 1000) SERVO_reg &= ~(1 << 2);
+		if (millis() - SERVO_stoptime > 1000) {
+			SERVO_reg &= ~(1 << 2);
+			PORTD |= (1 << 7); //set servo port high
+		}
 	}
 
-	if (millis() - MOT_time > 5) {
+	if (millis() - MOT_time > 20) {
 		MOT_time = millis();
-		if (MOT_mode > 0 & bitRead(SERVO_reg,2)==false) ST_step();
+		if (MOT_mode > 0 & bitRead(SERVO_reg, 2) == false) ST_step();
 	}
 
 	if (millis() - SW_time > 20) {
 		SW_time = millis();
 		SW_cl();
+		if (bitRead(COM_reg, 3) == true) {
+			S88_ct++;
+			if (S88_ct > 100)S88_lock(false); //give bridge free
+		}
 	}
 }
