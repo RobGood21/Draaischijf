@@ -45,6 +45,7 @@ unsigned long MOT_time;
 byte POS_last; //last posion on place
 byte POS_cur; // current position
 byte POS_rq; //requested position
+byte POS_reset = 100; //postion auto rewind
 byte S88_ct;
 byte fase;
 byte portc;
@@ -71,7 +72,20 @@ void setup() {
 	DDRC = 0x00; //port C as input
 	PORTC |= (1 << 0); PORTC |= (1 << 1); PORTC |= (1 << 2); //pins A0 -A2 set pullup resister
 
-	COM_reg |= (1 << 4);//set for initialising
+
+	//initialise start values for bridge
+	portc = PINC;
+	POS_cur = portc >> 3;
+	POS_last = POS_cur;
+	COM_reg |= (1 << 4); //bridge inactive wait for command
+	
+	if (POS_cur == 7) {
+		POS_reset = 97;
+	}
+	else {
+		POS_reset = 100 + POS_cur - 3; // 3=zero track
+	}
+
 
 }
 
@@ -149,14 +163,14 @@ void SW_cl() {
 					MOT_mode = 0; //stops stepper
 					ST_clear(); //sets coils of stepper off
 					SERVO_open();
-					//alleen tijdens testen, s88 brug vrij geven
-					S88_lock(false);
+					S88_lock(true);
 
+					//reset rewind count, makes current position start point
+					POS_reset = 100;
 
 					break;
 				case 2:
 					//schijf rechtom (zwart)
-
 					POS_rq = POS_last + 1;
 					if (POS_rq == 6)POS_rq = 7;
 					if (POS_rq > 7)POS_rq = 1;
@@ -168,16 +182,18 @@ void SW_cl() {
 		changed = changed >> 3;
 		if (changed > 0) {
 			POS_cur = PINC >> 3;
-			if (bitRead(COM_reg, 4) == true) { //during start-up
-				COM_reg &= ~(1 << 4); //reset init
-				if (POS_cur > 0) {
-					POS_rq = POS_cur;
+			if (POS_cur > 0 & POS_last != POS_cur) {
+				//verdraaiing hier meten
+				if (bitRead(COM_reg, 1) == true) {
+					POS_reset--;
 				}
 				else {
-					POS_rq = 4;
-				}							
-			}			
-			if (POS_cur > 0)POS_last = POS_cur;
+					POS_reset++;
+				}
+				Serial.print("Pos_reset:  ");
+				Serial.println(POS_reset);
+				POS_last = POS_cur;
+			}
 			ST_position();
 		}
 	}
@@ -191,10 +207,17 @@ void ST_stop() {
 void ST_start(byte direction) {
 	//true==right, false=left
 
+	Serial.print("Position:  ");
+	Serial.println(POS_cur);
+
+
 	Serial.print("request: ");
 	Serial.println(POS_rq);
-	Serial.println(direction);
+	//Serial.println(direction);
 	COM_reg &= ~(1 << 3); //lock S88
+
+	COM_reg &= ~(1 << 4); //bridge active
+
 	S88_lock(true);
 	SERVO_open();
 	switch (direction) {
@@ -216,6 +239,7 @@ void ST_position() {
 	//Serial.println(POS_cur);
 	if (MOT_mode > 0) {
 		if (POS_cur > 0) {
+
 			if (POS_cur == POS_rq) { //reached correct position
 				ST_stop();
 				COM_reg &= ~(1 << 2); //reset correction bit
@@ -245,18 +269,21 @@ void ST_position() {
 		daarna draairichting omkeren en herstarten
 
 */
-		Serial.println("positie veranderd zonder beweging");
-		SERVO_open();
-		COM_reg |= (1 << 2); //set correction bit
-		COM_reg ^= (1 << 1); //toggle direction memory
-		COM_reg &= ~(1 << 3);//reset S88 timer clear
+		if (bitRead(COM_reg, 4) == false) {
+			Serial.println("positie veranderd zonder beweging");
+			SERVO_open();
+			COM_reg |= (1 << 2); //set correction bit
+			COM_reg ^= (1 << 1); //toggle direction memory
+			COM_reg &= ~(1 << 3);//reset S88 timer clear
 
-		if (bitRead(COM_reg, 1) == true) {
-			ST_start(1);
+			if (bitRead(COM_reg, 1) == true) {
+				ST_start(1);
+			}
+			else {
+				ST_start(2);
+			}
 		}
-		else {
-			ST_start(2);
-		}
+
 	}
 }
 
@@ -718,7 +745,20 @@ void loop() {
 		SW_cl();
 		if (bitRead(COM_reg, 3) == true) {
 			S88_ct++;
-			if (S88_ct > 100)S88_lock(false); //give bridge free
+			if (S88_ct > 100){
+				S88_lock(false); //give bridge free
+				COM_reg |= (1 << 4); //bridge stop, inactive
+				COM_reg &= ~(1 << 3);
+
+				//auto rewind bridge LET OP HIER MOET NOG EEN Clear van koploper komen
+				//if koploper het ermee eens is...
+
+				if (POS_reset < 94) ST_start(2); //is halve draai plus 1 verder
+				if (POS_reset > 106)ST_start(1);
+
+			}
+
+
 		}
 	}
 }

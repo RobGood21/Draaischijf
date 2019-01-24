@@ -9,7 +9,7 @@ bit0 only accept reset, after direction command true
 bit1 boolean direction 
 bit2 correction in progress
 bit3 s88 clear bridge timer on
-bit4 Initialising bit set in setup
+bit4 STOP, if true bridge only starts with command
 bit5
 bit6
 bit7
