@@ -2,6 +2,15 @@
  Name:		Draaischijf.ino
  Created:	12/29/2018 8:26:39 PM
  Author:	Rob Antonisse
+
+ Opmerkingen:
+ werking S88 via opto TL072 rail op 5 S88 poort op 6, richting DCC is (soms) belangrijk, niet duidelijk waarom.
+ Servo tijdens reset, starten arduino is er overspraak, oplossen door een 1K tussen puls en +5V
+ Huidige brug geeft fysiek positie 6 als positie 7 hiervoor correctie in void SW_cl en in void setup
+
+
+
+
 */
 
 
@@ -46,6 +55,7 @@ byte POS_last; //last posion on place
 byte POS_cur; // current position
 byte POS_rq; //requested position
 byte POS_reset = 100; //postion auto rewind
+byte resettimer;
 byte S88_ct;
 byte fase;
 byte portc;
@@ -76,17 +86,16 @@ void setup() {
 	//initialise start values for bridge
 	portc = PINC;
 	POS_cur = portc >> 3;
+	if (POS_cur == 7)POS_cur = 6;
 	POS_last = POS_cur;
 	COM_reg |= (1 << 4); //bridge inactive wait for command
-	
-	if (POS_cur == 7) {
-		POS_reset = 97;
-	}
-	else {
-		POS_reset = 100 + POS_cur - 3; // 3=zero track
-	}
 
+	POS_reset = 100 + POS_cur - 3; // 3=zero track
 
+	Serial.print("Startpositie: ");
+	Serial.print(POS_cur);
+	Serial.print("   Reset: ");
+	Serial.println(POS_reset);
 }
 
 void ST_clear() {
@@ -152,8 +161,7 @@ void SW_cl() {
 					//schijf linksom (rood)
 
 					POS_rq = POS_last - 1;
-					if (POS_rq < 1 | POS_rq > 7)POS_rq = 7;
-					if (POS_rq == 6)POS_rq = 5;
+					if (POS_rq < 1)POS_rq = 6;
 					ST_start(1);
 					break;
 				case 1:
@@ -167,13 +175,13 @@ void SW_cl() {
 
 					//reset rewind count, makes current position start point
 					POS_reset = 100;
+					COM_reg |= (1 << 4); //stop bridge
 
 					break;
 				case 2:
 					//schijf rechtom (zwart)
 					POS_rq = POS_last + 1;
-					if (POS_rq == 6)POS_rq = 7;
-					if (POS_rq > 7)POS_rq = 1;
+					if (POS_rq > 6)POS_rq = 1;
 					ST_start(2);
 					break;
 				}
@@ -182,6 +190,7 @@ void SW_cl() {
 		changed = changed >> 3;
 		if (changed > 0) {
 			POS_cur = PINC >> 3;
+			if (POS_cur == 7)POS_cur = 6;
 			if (POS_cur > 0 & POS_last != POS_cur) {
 				//verdraaiing hier meten
 				if (bitRead(COM_reg, 1) == true) {
@@ -214,6 +223,7 @@ void ST_start(byte direction) {
 	Serial.print("request: ");
 	Serial.println(POS_rq);
 	//Serial.println(direction);
+	COM_reg &= ~(1 << 0); //lock request, reset only possible
 	COM_reg &= ~(1 << 3); //lock S88
 
 	COM_reg &= ~(1 << 4); //bridge active
@@ -573,21 +583,6 @@ void DEK_DCCh() { //handles incoming DCC commands, called from loop()
 	n++;
 	if (n > 6)n = 0;
 }
-void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
-	//type=CV(true) or switch(false)
-	//decoder basic adres of decoder 
-	//channel assigned one of the 4 channels of the decoder (1-4)
-	//Port which port R or L
-	//onoff bit3 port on or port off
-	//cv cvnumber
-	//cv value
-	int adres;
-	adres = ((decoder - 1) * 4) + channel;
-	//Applications 
-	//APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
-	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
-	//Add a void like APP_monitor for application
-}
 void APP_Monitor(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
 	//application for DCC monitor
 	if (type == true) {
@@ -626,6 +621,25 @@ void APP_Monitor(boolean type, int adres, int decoder, int channel, boolean port
 	}
 	Serial.println("");
 }
+
+void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
+	//type=CV(true) or switch(false)
+	//decoder basic adres of decoder 
+	//channel assigned one of the 4 channels of the decoder (1-4)
+	//Port which port R or L
+	//onoff bit3 port on or port off
+	//cv cvnumber
+	//cv value
+	int adres;
+	adres = ((decoder - 1) * 4) + channel;
+	//Applications 
+	APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
+	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
+	//Add a void like APP_monitor for application
+}
+
+
+
 //**End void's for DeKoder
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
 	/*
@@ -633,55 +647,68 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	*/
 	static byte check;
 	byte received;
-
-	if (decoder == 8) {
-		received = type + adres + channel + port;
-		if ((check ^ received) > 0) {
-			check = received;
+	if (decoder > 27 & decoder < 30) {
+		//received = type + adres + channel + port;
+		//if ((check ^ received) > 0) {
+			//check = received;
 			switch (adres) {
-			case 30:
-				if (bitRead(COM_reg, 0) == false) {
-
-
-					if (port == false) {
-						Serial.println("reset");
-						POS_rq = 0;
-						COM_reg |= (1 << 0);
-					}
+			case 109:
+				if (port == false) {
+					Serial.println("brugspoor is vrij");
+					COM_reg &= ~(1 << 5);
 				}
 				else {
+					Serial.println("brugspoor is bezet");
+					COM_reg |= (1 << 5);
+				}
+				break;
+
+			case 110:
+				if (port == true) {
+					Serial.println("reset");
+					POS_rq = 0;
+					COM_reg |= (1 << 0);
+				}
+				break;
+
+			case 111:
+				if (port == true) {
+					Serial.println("bit1");
 					if (bitRead(COM_reg, 0) == true) POS_rq |= (1 << 0);
 				}
 				break;
-			case 31:
-
-				if (port == false) {
+			case 112:
+				if (port == true) { //bit2
+					Serial.println("bit2");
 					if (bitRead(COM_reg, 0) == true)POS_rq |= (1 << 1);
 				}
-				else {
+				break;
+			case 113:
+				if (port == true) { //bit4
+					Serial.println("bit4");
 					if (bitRead(COM_reg, 0) == true)POS_rq |= (1 << 2);
-				}
-
-				break;
-			case 32:
-				if (bitRead(COM_reg, 0) == true) {
-					COM_reg &= ~(1 << 0);
-
+					break;
+			case 114:
+				if (port == true & bitRead(COM_reg, 0) == true) {
+					//COM_reg &= ~(1 << 0);
 					//Serial.println(POS_rq);
-					if (port == true) {
-						ST_start(1);
-					}
-					else {
-						ST_start(2);
-					}
+					ST_start(1);
 				}
 				break;
+				}
+			case 115:
+				if (port == true & bitRead(COM_reg, 0) == true) {
+					//COM_reg &= ~(1 << 0);
+					//Serial.println(POS_rq);
+					ST_start(2);
+					break;
+				}
 			}
-
-		}
-
+		//}
 	}
 }
+
+
 
 void S88_lock(boolean lock) {
 	//set pin 6 for S88 control
@@ -743,22 +770,27 @@ void loop() {
 	if (millis() - SW_time > 20) {
 		SW_time = millis();
 		SW_cl();
-		if (bitRead(COM_reg, 3) == true) {
-			S88_ct++;
-			if (S88_ct > 100){
-				S88_lock(false); //give bridge free
-				COM_reg |= (1 << 4); //bridge stop, inactive
-				COM_reg &= ~(1 << 3);
 
-				//auto rewind bridge LET OP HIER MOET NOG EEN Clear van koploper komen
-				//if koploper het ermee eens is...
+
+		resettimer++;
+		if (resettimer == 0) { //once in 3 seconds
+			if (bitRead(COM_reg, 5) == false & bitRead(COM_reg, 4) == true) {
 
 				if (POS_reset < 94) ST_start(2); //is halve draai plus 1 verder
 				if (POS_reset > 106)ST_start(1);
-
 			}
+		}
 
 
+
+
+		if (bitRead(COM_reg, 3) == true) {
+			S88_ct++;
+			if (S88_ct > 100) {
+				S88_lock(false); //give bridge free
+				COM_reg |= (1 << 4); //bridge stop, inactive
+				COM_reg &= ~(1 << 3);
+			}
 		}
 	}
 }

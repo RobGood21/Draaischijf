@@ -1,6 +1,13 @@
 pin 8-9-10-11 is portb
 rode knop linksom, zwart rechtom
 
+Besturing via DCC draai15 systeem van Kees Moerman
+Brug vrij = 109 (niet standaard in Draai15, in koploper logische actie maken) gebaseerd op bezetmelder op draaischijfspoor
+Reset = 110
+adres waarde 1 =111
+Adres waarde 2 =112
+Adres waarde 4 =112
+Adres waarde 8 niet in gebruik in deze sketch eventueel toe te voegen in APP_
 
 
 
@@ -10,7 +17,7 @@ bit1 boolean direction
 bit2 correction in progress
 bit3 s88 clear bridge timer on
 bit4 STOP, if true bridge only starts with command
-bit5
+bit5 block bridgerail is claimed, or train on bridge
 bit6
 bit7
 
