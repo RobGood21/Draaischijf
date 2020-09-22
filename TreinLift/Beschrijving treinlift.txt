@@ -1,0 +1,5 @@
+Beschrijving treinlift
+Aansluitingen hoog actief maken, alle minnen aan elkaar en aan de GND
+Pin8 (PORTB0) = Puls +
+Pin9 (PORTB1)= Direction +
+Pin10(PORTB2) =Enabled +

@@ -20,4 +20,14 @@
       <Filter>Misc Files</Filter>
     </None>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="__vm\.TreinLift.vsarduino.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Beschrijving treinlift.txt">
+      <Filter>Misc Files</Filter>
+    </Text>
+  </ItemGroup>
 </Project>
