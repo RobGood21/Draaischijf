@@ -9,6 +9,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DeKoder", "DeKoder\DeKoder.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WMServo", "WMServo\WMServo.vcxproj", "{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TreinLift", "TreinLift\TreinLift.vcxproj", "{8A3BCC8F-E9AA-46A9-AD42-9A10CDFEF44F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
@@ -27,6 +29,10 @@ Global
 		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Debug|x86.Build.0 = Debug|Win32
 		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Release|x86.ActiveCfg = Release|Win32
 		{D55B90D7-E8D9-4F65-936F-7B4E24FBEEBB}.Release|x86.Build.0 = Release|Win32
+		{8A3BCC8F-E9AA-46A9-AD42-9A10CDFEF44F}.Debug|x86.ActiveCfg = Debug|Win32
+		{8A3BCC8F-E9AA-46A9-AD42-9A10CDFEF44F}.Debug|x86.Build.0 = Debug|Win32
+		{8A3BCC8F-E9AA-46A9-AD42-9A10CDFEF44F}.Release|x86.ActiveCfg = Release|Win32
+		{8A3BCC8F-E9AA-46A9-AD42-9A10CDFEF44F}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -13,7 +13,6 @@
 
 */
 
-
 //**Declaraties for DeKoder
 volatile unsigned long DEK_Tperiode; //laatst gemeten tijd 
 volatile unsigned int DEK_duur; //gemeten duur van periode tussen twee interupts
@@ -41,11 +40,8 @@ unsigned long SERVO_clock;
 unsigned int SERVO_min = 1500;//unlocked
 unsigned int SERVO_max = 900;//locked
 
-
-
 //DCC adres in this version NOT programmable because project is only for private model railroad layout, can be set by setting value of DCCadres
-#define DCCadres 29  //used are 29-2 29-3 29-4 adresses 30-32
-
+//For used adresses check void  APP_DCC()
 unsigned long SW_time;
 //unsigned long SW_periode;
 byte COM_reg;
@@ -633,12 +629,10 @@ void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff
 	int adres;
 	adres = ((decoder - 1) * 4) + channel;
 	//Applications 
-	APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
+	//APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
 	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
 	//Add a void like APP_monitor for application
 }
-
-
 
 //**End void's for DeKoder
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
@@ -652,7 +646,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 		//if ((check ^ received) > 0) {
 			//check = received;
 			switch (adres) {
-			case 109:
+			case 109: //als brug vrij is is automatisch terugdraaien mogelijk
 				if (port == false) {
 					Serial.println("brugspoor is vrij");
 					COM_reg &= ~(1 << 5);
@@ -731,7 +725,12 @@ void SERVO_open() {
 	SERVO_reg |= (1 << 2);
 	SERVO_stoptime = millis();
 }
-
+void ST_autoback() { //called from loop
+	if (bitRead(COM_reg, 5) == false & bitRead(COM_reg, 4) == true) {
+		if (POS_reset < 95) ST_start(2); //is halve draai plus 1 verder
+		if (POS_reset > 105)ST_start(1);
+	}
+}
 void SERVO_run() {
 	//SERVO_speed();
 	if (bitRead(SERVO_reg, 0) == false) {
@@ -774,11 +773,7 @@ void loop() {
 
 		resettimer++;
 		if (resettimer == 0) { //once in 3 seconds
-			if (bitRead(COM_reg, 5) == false & bitRead(COM_reg, 4) == true) {
-
-				if (POS_reset < 94) ST_start(2); //is halve draai plus 1 verder
-				if (POS_reset > 106)ST_start(1);
-			}
+			ST_autoback();
 		}
 
 
