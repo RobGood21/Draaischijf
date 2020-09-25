@@ -11,7 +11,25 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WMServo", "WMServo\WMServo.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TreinLift", "TreinLift\TreinLift.vcxproj", "{8A3BCC8F-E9AA-46A9-AD42-9A10CDFEF44F}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Adafruit_SSD1306-2.1.0", "Libraries\Adafruit_SSD1306\2.1.0\Adafruit_SSD1306\Adafruit_SSD1306-2.1.0.vcxitems", "{8285355F-2B54-408A-95A4-DF183AB788E4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Adafruit_GFX_Library-1.7.5", "Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems", "{6F6C8F01-0FA7-4ED9-AFFB-293FCEDB64C4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Wire-1.0", "Libraries\Wire\1.0\Wire\Wire-1.0.vcxitems", "{7D94BBEB-DE9D-4CD9-A55A-EEFB4A7BC76A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EEPROM-2.0", "Libraries\EEPROM\2.0\EEPROM\EEPROM-2.0.vcxitems", "{DAC638CE-76E4-4632-86DB-0744F8C7BB1A}"
+EndProject
 Global
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems*{6f6c8f01-0fa7-4ed9-affb-293fcedb64c4}*SharedItemsImports = 9
+		Libraries\Wire\1.0\Wire\Wire-1.0.vcxitems*{7d94bbeb-de9d-4cd9-a55a-eefb4a7bc76a}*SharedItemsImports = 9
+		Libraries\Adafruit_SSD1306\2.1.0\Adafruit_SSD1306\Adafruit_SSD1306-2.1.0.vcxitems*{8285355f-2b54-408a-95a4-df183ab788e4}*SharedItemsImports = 9
+		Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems*{8a3bcc8f-e9aa-46a9-ad42-9a10cdfef44f}*SharedItemsImports = 4
+		Libraries\Adafruit_SSD1306\2.1.0\Adafruit_SSD1306\Adafruit_SSD1306-2.1.0.vcxitems*{8a3bcc8f-e9aa-46a9-ad42-9a10cdfef44f}*SharedItemsImports = 4
+		Libraries\EEPROM\2.0\EEPROM\EEPROM-2.0.vcxitems*{8a3bcc8f-e9aa-46a9-ad42-9a10cdfef44f}*SharedItemsImports = 4
+		Libraries\Wire\1.0\Wire\Wire-1.0.vcxitems*{8a3bcc8f-e9aa-46a9-ad42-9a10cdfef44f}*SharedItemsImports = 4
+		Libraries\EEPROM\2.0\EEPROM\EEPROM-2.0.vcxitems*{dac638ce-76e4-4632-86db-0744f8c7bb1a}*SharedItemsImports = 9
+	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
 		Release|x86 = Release|x86

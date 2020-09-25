@@ -1,5 +1,15 @@
 Beschrijving treinlift
 Aansluitingen hoog actief maken, alle minnen aan elkaar en aan de GND
 Pin8 (PORTB0) = Puls +
-Pin9 (PORTB1)= Direction +
-Pin10(PORTB2) =Enabled +
+Pin9 (PORTB1)= Direction +  false = naar beneden
+Pin10(PORTB2) =Enabled + false = draaien
+
+COM_status (gpior0)
+bit0 init ok false nulpunt bepaald, true nulpunt, home zoeken 
+bit1 direction
+bit2 request start 
+bit7 divider voor encoder
+
+EEPROM
+0~5 etage[0]
+100 spotstatus
