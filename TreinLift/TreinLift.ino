@@ -23,10 +23,10 @@
 #define regel2s DSP_settxt(0, 0, 1) //X Y size X=0 Y=0 geen cursor verplaatsing
 #define regelb DSP_settxt(30,20,6)
 #define regelst DSP_settxt(1,1,1)
-
+#define speed OCR2A
 #define up PORTB |=(1<<2);GPIOR0 |=(1<<1);
 #define down PORTB &=~(1<<2);GPIOR0 &=~(1<<1);
-#define speed OCR2A
+
 
 
 
@@ -34,20 +34,15 @@
 //#define stop TCCR2B &=~(1 << 3);  TIMSK2 &=~(1 << 1); //disable interupt
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
-unsigned long slowtime;
-unsigned long speedtime;
 byte slowcount;
 unsigned int speedcount;
 byte SPD_step;
-//unsigned long wait;
 volatile unsigned long POS;
 volatile unsigned long POS_rq;
 volatile unsigned long etage[8];
 byte etage_status; //bit0 false positie bepaald, enz lezen eeprom 100
 byte etage_rq;
-
-
-//byte speed = 100;
+byte MEM_reg;
 byte switchstatus[3];
 byte switchcount;
 byte PRG_fase;
@@ -56,16 +51,18 @@ byte ENC_count;
 byte Vmax = 6;
 volatile unsigned long SPD_dis;
 volatile byte SPD_disstep;
-
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 	cd; //clear display
-	regel1s; display.print("www.wisselmotor.nl");
-	regel2; display.print("Treinlift");
+	DSP_settxt(10,30,1); display.print("www.wisselmotor.nl");
+	//regel2; display.print("Treinlift");
 	display.display();
-	delay(500);
-
+	delay(2000);
+	cd;
+	regel2; display.print("TreinLift");
+	display.display();
+	delay(2000);
 	//ports
 	PORTC |= (15 << 0); //pullup  A0~A3
 	DDRB |= (14 << 0); //Pin9~Pin11 as outputs
@@ -78,36 +75,32 @@ void setup() {
 		FACTORY();
 		delay(500);
 	}
-
 	//timer 2 settings on pin11 compare match
 	TCCR2A |= (1 << 6); //toggle pin6
 	TCCR2A |= (1 << 1);
 	//TCCR2B |= (1 << 3);
 	TCCR2B |= (2 << 0); //prescaler standaard
-	//OCR2A = ; //snelheid
+	OCR2A = 255; //snelheid
 	//TIMSK2 |= (1 << 1); //enable interupt
-
 	//init
 	switchstatus[0] = 0xFF;
 	switchstatus[1] = 0xFF;
 	switchstatus[2] = 0xFF;
-
 	switchcount = 0;
-
 	MEM_read();
 	MOTOR();
 	RUN_home();
 }
-
 void start() {
 	if (GPIOR0 & (1 << 3)) {
-		//SPD_dis = 5000;
 		SPD_disstep = 13;
-		SPD_step = 0;
+		SPD_step = 6;
+		if (MEM_reg & (1 << 0)) SPD_step = 0;
 		GPIOR0 |= (1 << 4);
+		if (PRG_fase > 0)SPD_step = 6;
 		SPD(SPD_step);
 		TCCR2B |= (1 << 3);
-		TIMSK2 |= (1 << 1); //enable interupt   //if(GPIOR0 & (1<<3){ 
+		TIMSK2 |= (1 << 1); //enable interupt 
 	}
 }
 void stop() {
@@ -132,17 +125,14 @@ void MOTOR() {
 		}
 	}
 }
-
-
 void RUN_home() { //move to HOME	
 	down;
 	GPIOR0 |= (1 << 0);
 	start();
-	DSP_exe(10);
+	DSP_exe(10);	
 }
-
 ISR(TIMER2_COMPA_vect) {
-	int sd;
+	int sd;	
 	if (POS_rq > POS) {
 		sd = POS_rq - POS;
 	}
@@ -166,18 +156,19 @@ ISR(TIMER2_COMPA_vect) {
 			//Serial.println("nul");
 		}
 	}
-
 	//vertraging
-	if (~GPIOR0 & (1 << 0)) { //niet tijdens home
-		if (sd == SPD_dis) {
-			GPIOR0 &= ~(1 << 4); //stop versnellen
-			if (SPD_disstep > SPD_step)SPD_step--;
-			//SPD_dis = SPD_dis - 500;
-			SPD_disstep--;
-			Serial.println(SPD_dis);
-			SPD(SPD_step);
+		if (MEM_reg & (1 << 0) & PRG_fase ==0) {
+			if (~GPIOR0 & (1 << 0)) { //niet tijdens home
+				if (sd < SPD_dis) {
+					GPIOR0 &= ~(1 << 4); //stop versnellen		
+					if (SPD_disstep > SPD_step) {
+						SPD_step--;
+						SPD_disstep--;
+						SPD(SPD_step);
+					}
+				}
+			}
 		}
-	}
 }
 void FACTORY() {
 	//clears eeprom
@@ -189,67 +180,70 @@ void FACTORY() {
 void MEM_read() {
 	etage_status = EEPROM.read(100);
 	Vmax = EEPROM.read(101);
+	MEM_reg = EEPROM.read(102);
 	if (Vmax > 12) Vmax = 6;
 	for (byte i = 0; i < 8; i++) {
 		EEPROM.get(0 + (5 * i), etage[i]);
 		if (etage[i] == 0xFFFFFFFF)etage[i] = 0;
-		//Serial.print(i); Serial.println("---"); Serial.println(etage[i]);
 	}
 }
 void SPD(byte step) {
-	Serial.println(step);
+	//Serial.print("step: "); Serial.println(step);// Serial.print("  Pos: "); Serial.println(POS);
 	switch (step) {
-
 	case 0:
-		SPD_dis = 0;
+		//TCCR2B |= (7 << 0);
+		SPD_dis = 100;
 		speed = 255;
 		break;
 	case 1:
-		SPD_dis = 400;
-		speed = 200;
+		//TCCR2B |= (2 << 0);
+		SPD_dis = 250;
+		speed = 220;
 		break;
 	case 2:
-		SPD_dis = 800;
+		//TCCR2B |= (2 << 0);
+		SPD_dis = 500;
 		speed = 180;
 		break;
 	case 3:
-		SPD_dis = 1200;
+		SPD_dis = 700;
 		speed = 150;
 		break;
 	case 4:
-		SPD_dis = 1600;
+		//TCCR2B |= (2 << 0);
+		SPD_dis = 900;
 		speed = 120;
 		break;
 	case 5:
-		SPD_dis = 1800;
-		speed = 100;
+		SPD_dis = 1100;
+		speed = 90;
 		break;
 	case 6:
-		SPD_dis = 2000;
-		speed = 80;
+		SPD_dis = 1250;
+		speed = 70;
 		break;
 	case 7:
-		SPD_dis = 2500;
+		SPD_dis = 1500;
 		speed = 60;
 		break;
 	case 8:
-		SPD_dis = 3000;
+		SPD_dis = 1800;
 		speed = 50;
 		break;
 	case 9:
-		SPD_dis = 3500;
+		SPD_dis = 2100;
 		speed = 40;
 		break;
 	case 10:
-		SPD_dis = 4000;
+		SPD_dis = 2400;
 		speed = 30;
 		break;
 	case 11:
-		SPD_dis = 4500;
+		SPD_dis = 2700;
 		speed = 20;
 		break;
 	case 12:
-		SPD_dis = 5000;
+		SPD_dis = 3000;
 		speed = 10;
 		break;
 	}
@@ -258,11 +252,9 @@ void DSP_exe(byte txt) {
 	cd;
 	switch (txt) {
 	case 10:
-		regel1s; display.print("Zoek Home");
+		regelst; display.print("going home.....");
 		break;
 	case 12:
-		//Serial.println(txt);		
-
 		if (etage_status & (1 << etage_rq)) { //etage niet bepaald
 			regel1s; display.print("Etage "); display.print(etage_rq); display.print(" niet bepaald");
 			regelb; display.print("*");
@@ -297,13 +289,24 @@ void DSP_exe(byte txt) {
 		regel1s; display.print("max snelheid");
 		regel2; display.print(Vmax);
 		break;
-
+	case 50:
+		regel1s; display.print("Diverse ");
+		switch (PRG_level) {
+		case 0:
+			display.print("versnellen"); regel2;
+			if (MEM_reg & (1 << 0)) {
+				display.print("Ja");
+			}
+			else {
+				display.println("nee");
+			}
+			break;
+		}
+		break;
 	}
 	display.display();
 }
 void DSP_prg() {
-	//Serial.print("PRG_fase: "); Serial.println(PRG_fase);
-
 	switch (PRG_fase) {
 	case 0: //in bedrijf
 		DSP_exe(21); //12
@@ -329,18 +332,19 @@ void DSP_prg() {
 			break;
 		}
 		break;
-	case 3:
+	case 3: //Vmax
 		DSP_exe(40);
+		break;
+	case 4: //diverse instellingen
+		DSP_exe(50);
 		break;
 	}
 }
-
 void DSP_settxt(byte X, byte Y, byte size) {
 	display.setTextSize(size);
 	display.setTextColor(WHITE);
 	if (X + Y > 0) display.setCursor(X, Y);
 }
-
 void SW_read() { //lezen van schakelaars
 	//Dit werkt alleen met pullups naar 5V van 1K (interne pullup is te zwak)
 	byte sr; byte changed; byte v;
@@ -351,17 +355,18 @@ void SW_read() { //lezen van schakelaars
 	else {
 		v = Vmax;
 	}
-
-	if (GPIOR0 & (1 << 4)) {//versnellen
-		speedcount++;
-		if (speedcount > 2000) {
-			speedcount = 0;
-			if (SPD_step < v) {
-				SPD_step++;
-				SPD(SPD_step);
-			}
-			else {
-				GPIOR0 &= ~(1 << 4);
+	if (MEM_reg & (1 << 0) & PRG_fase == 0) {
+		if (GPIOR0 & (1 << 4)) {//versnellen
+			speedcount++;
+			if (speedcount > 500) {
+				speedcount = 0;
+				if (SPD_step < v) {
+					SPD_step++;
+					SPD(SPD_step);
+				}
+				else {
+					GPIOR0 &= ~(1 << 4);
+				}
 			}
 		}
 	}
@@ -550,6 +555,17 @@ void SW_on(byte sw) {
 		case 3:
 			SW_encoder(true);
 			break;
+		case 4:
+			switch (PRG_level) {
+			case 0:
+				MEM_reg ^= (1 << 0);
+				DSP_exe(50);
+				break;
+			case 1:
+				break;
+			}
+
+			break;
 		}
 	}
 	else {
@@ -597,6 +613,9 @@ void SW_1(boolean onoff) { //down
 		case 3: //instellen Vmax
 			SW_encoder(false);
 			break;
+		case 4: //diverse
+			//verhogen level 
+			break;
 		}
 	}
 	else {
@@ -629,80 +648,86 @@ void SW_2() {
 		PRG_fase = 0;
 		DSP_prg();
 		break;
+	case 4://diverse
+		EEPROM.update(102, MEM_reg);
+		PRG_fase = 0;
+		DSP_prg();
+		break;
 	}
 }
 void SW_3() {
 	PRG_fase++;
-	if (PRG_fase > 3)PRG_fase = 0;
+	if (PRG_fase > 4)PRG_fase = 0;
 	DSP_prg();
+	PRG_level = 0;
 }
 void SW_encoder(boolean dir) {
 	//Serial.println(dir);
 	switch (PRG_fase) {
 	case 0:
-		if (!dir) {
-			etage_rq++;
-			if (etage_rq > 7)etage_rq = 0;
-		}
-		else {
-			etage_rq--;
-			if (etage_rq > 7)etage_rq = 7;
-		}
+		ENC_select(dir);
 		POS_rq = etage[etage_rq];
-		//Serial.print("POS= "); Serial.println(POS);
-		//Serial.print("POS_rq= "); Serial.println(POS_rq);
-
-
 		if (POS < POS_rq) {
 			up;
 		}
 		else {
 			down;
 		}
-		//Serial.print("GPIOR0 bit 0: "); Serial.println(GPIOR0, BIN);
 		if (POS != POS_rq)start();
-
-		//als autostart aanstaat, nog maken
-
 		DSP_exe(12);
 		break;
 	case 1: //handmatig
+		ENC_fine(dir);
+		DSP_exe(30);
 		break;
 	case 2: //etage instellen
-		if (~dir) {
-			etage_rq++;
-			if (etage_rq > 7)etage_rq = 0;
-		}
-		else {
-			etage_rq--;
-			if (etage_rq > 7)etage_rq = 7;
-		}
+		switch (PRG_level) {
+		case 0:
+			ENC_select(dir);
 		DSP_exe(15);
+			break;
+		case 1:
+			ENC_fine(dir);
+			DSP_exe(16);
+			break;
+		}
 		break;
 	case 3: //vmax instellen
 		if (dir) {
 			if (Vmax > 1)Vmax--;
-
 		}
 		else {
-
 			if (Vmax < 12) Vmax++;
 		}
 		DSP_exe(40);
 		break;
-
+	}
+}
+void ENC_fine(boolean dir) {
+	if (dir) {
+		down;
+		PORTB ^= (1 << 3);
+		if (PINB & (1 << 3))POS--;
+	}
+	else {
+		up;
+		PORTB ^= (1 << 3);
+		if (PINB & (1 << 3))POS++;
+	}
+}
+void ENC_select(boolean dir) {
+	if (!dir) {
+		etage_rq++;
+		if (etage_rq > 7)etage_rq = 0;
+	}
+	else {
+		etage_rq--;
+		if (etage_rq > 7)etage_rq = 7;
 	}
 }
 void loop() {
-	//if (millis() - slowtime > 1) {
-	//	slowtime = millis();
 	slowcount++;
 	if (slowcount == 0xFF) {
 		SW_read();
 	}
-
-	//if (millis() - wait > 1000) {
-	//	if (GPIOR0 & (1 << 2))start;
-	//	GPIOR0 &= ~(1 << 2);
-	//}
 }

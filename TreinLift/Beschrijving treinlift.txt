@@ -1,8 +1,8 @@
 Beschrijving treinlift
 Aansluitingen hoog actief maken, alle minnen aan elkaar en aan de GND
-Pin8 (PORTB0) = Puls +
-Pin9 (PORTB1)= Direction +  false = naar beneden
-Pin10(PORTB2) =Enabled + false = draaien
+Pin11 (PORTB3) = Puls +
+Pin10 (PORTB2)= Direction +  false = naar beneden
+Pin9(PORTB1) =Enabled + false = draaien
 
 COM_status (gpior0)
 bit0 init ok false nulpunt bepaald, true nulpunt, home zoeken 
@@ -12,7 +12,11 @@ bit3 flag motor aan of uit, schakeld motor vrij, true is aan
 bit4 versnellen true, vertragen false
 bit7 divider voor encoder
 
+MEM_reg 
+bit0  versnellen vertragen true default
+
 EEPROM
 0~5 etage[0]
 100 spotstatus
 101 Vmax
+102 MEM_reg
