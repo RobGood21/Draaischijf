@@ -25,11 +25,26 @@
 #define regelst DSP_settxt(1,1,1)
 #define up PORTB |=(1<<2);GPIOR0 |=(1<<1);
 #define down PORTB &=~(1<<2);GPIOR0 &=~(1<<1);
-
-//#define staart if(GPIOR0 TCCR2B |= (1 << 3);TIMSK2 |= (1 << 1); //enable interupt   //if(GPIOR0 & (1<<3){ 
-//#define stop TCCR2B &=~(1 << 3);  TIMSK2 &=~(1 << 1); //disable interupt
-
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+//**Declaraties for DeKoder
+volatile unsigned long DEK_Tperiode; //laatst gemeten tijd 
+volatile unsigned int DEK_duur; //gemeten duur van periode tussen twee interupts
+boolean DEK_Monitor = false; //shows DCC commands as bytes
+byte DEK_Reg; //register voor de decoder 
+byte DEK_Status = 0;
+byte DEK_byteRX[6]; //max length commandoos for this decoder 6 bytes (5x data 1x error check)
+byte DEK_countPA = 0; //counter for preample
+byte DEK_BufReg[6]; //registerbyte for 12 command buffers, can be lowered.
+byte DEK_Buf0[6];
+byte DEK_Buf1[6];
+byte DEK_Buf2[6];
+byte DEK_Buf3[6];
+byte DEK_Buf4[6];
+byte DEK_Buf5[6];
+//**End declaration for deKoder
+byte DCC_adres;
+
 byte COM_reg;
 byte slowcount;
 unsigned int speedcount;
@@ -53,11 +68,21 @@ volatile unsigned long SPD_dis;
 volatile byte SPD_disstep;
 unsigned long runwait;
 
-
-
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+	//**begin Setup for DeKoder 
+	//Serial.begin(9600);
+	//interrupt on PIN2
+	DDRD &= ~(1 << 2);//bitClear(DDRD, 2); //pin2 input
+	DEK_Tperiode = micros();
+	EICRA |= (1 << 0);//EICRA – External Interrupt Control Register A bit0 > 1 en bit1 > 0 (any change)
+	EICRA &= ~(1 << 1);	//bitClear(EICRA, 1);
+	EIMSK |= (1 << INT0);//External Interrupt Mask Register bit0 INT0 > 1
+	//**End Setup for DeKoder
+
+
 	cd; //clear display
 	DSP_settxt(10, 30, 1); display.print("www.wisselmotor.nl");
 	//regel2; display.print("Treinlift");
@@ -94,6 +119,303 @@ void setup() {
 	MEM_read();
 	MOTOR();
 	RUN_home();
+}
+ISR(INT0_vect) { //ISR for DeKoder receive on Pin 2
+	//DEK_Reg fase van bit ontvangst
+	//bit 0= bitpart ok (1) of failed(0)
+	//bit1= truepart 
+	//bit2=falsepart
+	//bit3= received bit true =true false =false
+	//bit4=restart, begin, failed as true
+
+	cli();
+	DEK_duur = (micros() - DEK_Tperiode);
+	DEK_Tperiode = micros();
+	if (DEK_duur > 50) {
+		if (DEK_duur < 62) {
+			DEK_Reg |= (1 << 0); //bitSet(DekReg, 0);
+
+			if (bitRead(DEK_Reg, 1) == false) {
+				DEK_Reg &= ~(1 << 2); //bitClear(DekReg, 2);
+				DEK_Reg |= (1 << 1);
+			}
+			else { //received full true bit
+
+				DEK_Reg |= (1 << 3);
+				DEK_BitRX();
+				DEK_Reg &= ~(1 << 2);//bitClear(DekReg, 2);
+				DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);
+			}
+		}
+		else {
+			if (DEK_duur > 106) {
+
+				if (DEK_duur < 124) { //preferred 118 6us extra space in false bit
+					DEK_Reg |= (1 << 0); //bitSet(DekReg, 0);
+					if (bitRead(DEK_Reg, 2) == false) {
+						DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);
+						DEK_Reg |= (1 << 2);  //bitSet(DekReg, 2);
+					}
+					else { //received full false bit
+						DEK_Reg &= ~(1 << 3); //bitClear(DekReg, 3);
+						DEK_BitRX();
+						DEK_Reg &= ~(1 << 2);//bitClear(DekReg, 2);
+						DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);
+					}
+				}
+			}
+		}
+	}
+	sei();
+}
+//********Begin Void's for DeKoder
+void DEK_begin() {//runs when bit is corrupted, or command not correct
+	//lesscount++;
+	DEK_countPA = 0;
+	DEK_Reg = 0;
+	DEK_Status = 0;
+	for (int i = 0; i < 6; i++) {
+		DEK_byteRX[i] = 0; //reset receive array
+	}
+}
+void DEK_BufCom(boolean CV) { //create command in Buffer
+	byte i = 0;
+	while (i < 12) {
+
+		if (bitRead(DEK_BufReg[i], 7) == false) {
+			DEK_BufReg[i] = 0; //clear found buffer
+
+
+			DEK_Buf0[i] = DEK_byteRX[0];
+			DEK_Buf1[i] = DEK_byteRX[1];
+			DEK_Buf2[i] = DEK_byteRX[2];
+
+			if (CV == true) {
+				DEK_BufReg[i] |= (1 << 0); //set for CV
+				DEK_Buf3[i] = DEK_byteRX[3];
+				DEK_Buf4[i] = DEK_byteRX[4];
+				DEK_Buf5[i] = DEK_byteRX[5];
+			}
+			else {
+
+				DEK_Buf3[i] = 0;
+				DEK_Buf4[i] = 0;
+				DEK_Buf5[i] = 0;
+			}
+			DEK_BufReg[i] |= (1 << 7); //claim buffer
+			i = 15;
+		}
+		i++;
+	} //close for loop
+} //close void
+void DEK_BitRX() { //new version
+	static byte countbit = 0; //counter received bits
+	static byte countbyte = 0;
+	static byte n = 0;
+	DEK_Reg |= (1 << 4);//resets and starts process if not reset in this void
+	switch (DEK_Status) {
+		//*****************************
+	case 0: //Waiting for preample 
+		if (bitRead(DEK_Reg, 3) == true) {
+			DEK_countPA++;
+			if (DEK_countPA > 12) {
+				DEK_Status = 1;
+				countbit = 0;
+				countbyte = 0;
+			}
+			bitClear(DEK_Reg, 4);
+		}
+		break;
+		//*************************
+	case 1: //Waiting for false startbit
+		if (bitRead(DEK_Reg, 3) == false) { //startbit receive
+			DEK_countPA = 0;
+			DEK_Status = 2;
+		}
+		//if Dekreg bit 3= true no action needed.
+		bitClear(DEK_Reg, 4); //correct, so resume process
+		break;
+		//*************************
+	case 2: //receiving data
+		if (bitRead(DEK_Reg, 3) == true) DEK_byteRX[countbyte] |= (1 << (7 - countbit));
+		countbit++;
+		if (countbit == 8) {
+			countbit = 0;
+			DEK_Status = 3;
+			countbyte++;
+		}
+		bitClear(DEK_Reg, 4); //correct, so resume process
+		break;
+		//*************************
+	case 3: //waiting for separating or end bit
+		if (bitRead(DEK_Reg, 3) == false) { //false bit
+			DEK_Status = 2; //next byte
+			if ((bitRead(DEK_byteRX[0], 6) == false) & (bitRead(DEK_byteRX[0], 7) == true))bitClear(DEK_Reg, 4); //correct, so resume process	
+		}
+		else { //true bit, end bit, only 3 byte and 6 byte commands handled by this dekoder
+			switch (countbyte) {
+			case 3: //Basic Accessory Decoder Packet received
+				//check error byte
+				if (DEK_byteRX[2] = DEK_byteRX[0] ^ DEK_byteRX[1])DEK_BufCom(false);
+				break; //6
+			case 6: ///Accessory decoder configuration variable Access Instruction received (CV)
+				//in case of CV, handle only write command
+				if (bitRead(DEK_byteRX[2], 3) == true && (bitRead(DEK_byteRX[2], 2) == true)) {
+					//check errorbyte and make command
+					if (DEK_byteRX[5] = DEK_byteRX[0] ^ DEK_byteRX[1] ^ DEK_byteRX[2] ^ DEK_byteRX[3] ^ DEK_byteRX[4])DEK_BufCom(true);
+				}
+				break;
+			} //close switch bytecount
+		}//close bittype
+		break;
+		//***************************************
+	} //switch dekstatus
+	if (bitRead(DEK_Reg, 4) == true)DEK_begin();
+}
+void DEK_DCCh() { //handles incoming DCC commands, called from loop()
+	static byte n = 0; //one buffer each passing
+	byte temp;
+	int decoder;
+	int channel = 1;
+	int adres;
+	boolean port = false;
+	boolean onoff = false;
+	int cv;
+	int value;
+
+	//translate command
+	if (bitRead(DEK_BufReg[n], 7) == true) {
+		decoder = DEK_Buf0[n] - 128;
+		if (bitRead(DEK_Buf1[n], 6) == false)decoder = decoder + 256;
+		if (bitRead(DEK_Buf1[n], 5) == false)decoder = decoder + 128;
+		if (bitRead(DEK_Buf1[n], 4) == false)decoder = decoder + 64;
+		//channel
+		if (bitRead(DEK_Buf1[n], 1) == true) channel = channel + 1;
+		if (bitRead(DEK_Buf1[n], 2) == true) channel = channel + 2;
+		//port
+		if (bitRead(DEK_Buf1[n], 0) == true)port = true;
+		//onoff
+		if (bitRead(DEK_Buf1[n], 3) == true)onoff = true;
+		//CV
+		if (bitRead(DEK_BufReg[n], 0) == true) {
+			cv = DEK_Buf3[n];
+			if (bitRead(DEK_Buf2[n], 0) == true)cv = cv + 256;
+			if (bitRead(DEK_Buf2[n], 1) == true)cv = cv + 512;
+			cv++;
+			value = DEK_Buf4[n];
+		}
+		else {
+			cv = 0;
+			value = 0;
+		}
+		COM_exe(bitRead(DEK_BufReg[n], 0), decoder, channel, port, onoff, cv, value);
+		//Show Monitor (bytes)
+		if (DEK_Monitor == true) {
+			Serial.print("buffer= ");
+			Serial.print(n);
+			Serial.print("  value:  ");
+			Serial.print(bitRead(DEK_BufReg[n], 7));
+			Serial.print(bitRead(DEK_BufReg[n], 6));
+			Serial.print(bitRead(DEK_BufReg[n], 5));
+			Serial.print(bitRead(DEK_BufReg[n], 4));
+			Serial.print(bitRead(DEK_BufReg[n], 3));
+			Serial.print(bitRead(DEK_BufReg[n], 2));
+			Serial.print(bitRead(DEK_BufReg[n], 1));
+			Serial.print(bitRead(DEK_BufReg[n], 0));
+			Serial.println("");
+
+			temp = DEK_Buf0[n];
+			Serial.print(bitRead(temp, 7));
+			Serial.print(bitRead(temp, 6));
+			Serial.print(bitRead(temp, 5));
+			Serial.print(bitRead(temp, 4));
+			Serial.print(bitRead(temp, 3));
+			Serial.print(bitRead(temp, 2));
+			Serial.print(bitRead(temp, 1));
+			Serial.print(bitRead(temp, 0));
+			Serial.println("");
+
+			temp = DEK_Buf1[n];
+			Serial.print(bitRead(temp, 7));
+			Serial.print(bitRead(temp, 6));
+			Serial.print(bitRead(temp, 5));
+			Serial.print(bitRead(temp, 4));
+			Serial.print(bitRead(temp, 3));
+			Serial.print(bitRead(temp, 2));
+			Serial.print(bitRead(temp, 1));
+			Serial.print(bitRead(temp, 0));
+			Serial.println("");
+
+			temp = DEK_Buf2[n];
+			Serial.print(bitRead(temp, 7));
+			Serial.print(bitRead(temp, 6));
+			Serial.print(bitRead(temp, 5));
+			Serial.print(bitRead(temp, 4));
+			Serial.print(bitRead(temp, 3));
+			Serial.print(bitRead(temp, 2));
+			Serial.print(bitRead(temp, 1));
+			Serial.print(bitRead(temp, 0));
+			Serial.println("");
+
+			temp = DEK_Buf3[n];
+			Serial.print(bitRead(temp, 7));
+			Serial.print(bitRead(temp, 6));
+			Serial.print(bitRead(temp, 5));
+			Serial.print(bitRead(temp, 4));
+			Serial.print(bitRead(temp, 3));
+			Serial.print(bitRead(temp, 2));
+			Serial.print(bitRead(temp, 1));
+			Serial.print(bitRead(temp, 0));
+			Serial.println("");
+
+			temp = DEK_Buf4[n];
+			Serial.print(bitRead(temp, 7));
+			Serial.print(bitRead(temp, 6));
+			Serial.print(bitRead(temp, 5));
+			Serial.print(bitRead(temp, 4));
+			Serial.print(bitRead(temp, 3));
+			Serial.print(bitRead(temp, 2));
+			Serial.print(bitRead(temp, 1));
+			Serial.print(bitRead(temp, 0));
+			Serial.println("");
+
+
+			temp = DEK_Buf5[n];
+			Serial.print(bitRead(temp, 7));
+			Serial.print(bitRead(temp, 6));
+			Serial.print(bitRead(temp, 5));
+			Serial.print(bitRead(temp, 4));
+			Serial.print(bitRead(temp, 3));
+			Serial.print(bitRead(temp, 2));
+			Serial.print(bitRead(temp, 1));
+			Serial.print(bitRead(temp, 0));
+			Serial.println("");
+			Serial.println("------");
+
+		}
+		//clear buffer
+		DEK_BufReg[n] = 0;
+		DEK_Buf0[n] = 0;
+		DEK_Buf1[n] = 0;
+		DEK_Buf2[n] = 0;
+		DEK_Buf3[n] = 0;
+		DEK_Buf4[n] = 0;
+		DEK_Buf5[n] = 0;
+	}
+	n++;
+	if (n > 6)n = 0;
+}
+void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
+	int adres;
+	adres = ((decoder - 1) * 4) + channel;
+	//Applications 
+	//APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
+	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
+	//Add a void like APP_monitor for application
+}
+//**End void's for DeKoder
+void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
+	Serial.println(adres);
 }
 void start() {
 	if (GPIOR0 & (1 << 3)) {
@@ -190,6 +512,8 @@ void MEM_read() {
 	Vmax = EEPROM.read(101);
 	MEM_reg = EEPROM.read(102);
 	if (Vmax > 12) Vmax = 6;
+	DCC_adres = EEPROM.read(103);
+	if (DCC_adres == 0xFF)DCC_adres = 0;
 	for (byte i = 0; i < 8; i++) {
 		EEPROM.get(0 + (5 * i), etage[i]);
 		if (etage[i] == 0xFFFFFFFF)etage[i] = 0;
@@ -312,6 +636,10 @@ void DSP_exe(byte txt) {
 			break;
 		}
 		break;
+	case 60:
+		regel1s; display.println("DCC adres");
+		regel2; display.print((DCC_adres * 4)+1); regel2s; display.print("("); display.print(DCC_adres+1); display.print("-1)");
+		break;
 	}
 	display.display();
 }
@@ -346,6 +674,9 @@ void DSP_prg() {
 		break;
 	case 4: //diverse instellingen
 		DSP_exe(50);
+		break;
+	case 5: //DCC adres instellen
+		DSP_exe(60);
 		break;
 	}
 }
@@ -660,11 +991,16 @@ void SW_2() {
 		PRG_fase = 0;
 		DSP_prg();
 		break;
+	case 5:
+		EEPROM.update(103, DCC_adres);
+		PRG_fase = 0;
+		DSP_prg();
+		break;
 	}
 }
 void SW_3() {
 	PRG_fase++;
-	if (PRG_fase > 4)PRG_fase = 0;
+	if (PRG_fase > 5)PRG_fase = 0;
 	DSP_prg();
 	PRG_level = 0;
 }
@@ -686,7 +1022,7 @@ void RUN_rq() {
 		//Serial.print("draait");
 		if (~GPIOR0 & (1 << 6)) {
 			//Serial.print("+");
-			GPIOR0 |=(1 << 6);
+			GPIOR0 |= (1 << 6);
 			/*
 			if (GPIOR0 & (1 << 0)) {
 
@@ -696,7 +1032,7 @@ void RUN_rq() {
 				POS_rq = POS + 3000; // SPD_dis;
 			}
 */
-		}		
+		}
 	}
 	else {
 		//Serial.println("mag nu");
@@ -709,10 +1045,9 @@ void RUN_rq() {
 			down;
 		}
 		if (POS != POS_rq)start();
-		
-	}	
-}
 
+	}
+}
 void SW_encoder(boolean dir) {
 	//Serial.println(dir);
 	switch (PRG_fase) {
@@ -743,8 +1078,19 @@ void SW_encoder(boolean dir) {
 		}
 		else {
 			if (Vmax < 12) Vmax++;
+
 		}
 		DSP_exe(40);
+		break;
+	case 5: //DCC (decoder)adres
+		if (dir) {
+			DCC_adres--;if (DCC_adres > 250)DCC_adres = 250;
+		}
+		else {
+			DCC_adres++; if (DCC_adres > 250)DCC_adres = 0;
+		}
+		
+		DSP_exe(60);
 		break;
 	}
 }
@@ -771,14 +1117,16 @@ void ENC_select(boolean dir) {
 	}
 }
 void loop() {
+	//tbv dekoder
+	DEK_DCCh();
 	slowcount++;
 	if (slowcount == 0xFF) {
 		count++;
 		if (count == 0) {
-			if(GPIOR0 & (1<<6))RUN_rq();
+			if (GPIOR0 & (1 << 6))RUN_rq();
 			if (COM_reg & (1 << 0))ET_rq();
 		}
 		SW_read();
-		
+
 	}
 }

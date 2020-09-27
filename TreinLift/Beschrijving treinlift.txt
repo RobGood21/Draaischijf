@@ -24,3 +24,4 @@ EEPROM
 100 spotstatus
 101 Vmax
 102 MEM_reg
+103 DCC decoder adres, default=0xFF;
