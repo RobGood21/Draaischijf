@@ -4,12 +4,16 @@ Pin11 (PORTB3) = Puls +
 Pin10 (PORTB2)= Direction +  false = naar beneden
 Pin9(PORTB1) =Enabled + false = draaien
 
-COM_status (gpior0)
+COM_status 
+bit0; et_rqwait true wachten
+gpior0
 bit0 init ok false nulpunt bepaald, true nulpunt, home zoeken 
 bit1 direction
 bit2 request start 
 bit3 flag motor aan of uit, schakeld motor vrij, true is aan
 bit4 versnellen true, vertragen false
+bit5 motor draaid true, false niet
+bit6 systeem, afremmen bij verandering terwijl draaid, actief =true
 bit7 divider voor encoder
 
 MEM_reg 
