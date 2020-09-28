@@ -21,7 +21,7 @@
 #define regel3 DSP_settxt(10,23,2) //value tweede regel groot
 #define regel1s DSP_settxt(0, 2, 1) //value eerste regel klein
 #define regel2s DSP_settxt(0, 0, 1) //X Y size X=0 Y=0 geen cursor verplaatsing
-#define regelb DSP_settxt(30,20,6)
+#define regelb DSP_settxt(50,10,6)
 #define regelst DSP_settxt(1,1,1)
 #define up PORTB |=(1<<2);GPIOR0 |=(1<<1);
 #define down PORTB &=~(1<<2);GPIOR0 &=~(1<<1);
@@ -415,7 +415,26 @@ void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff
 }
 //**End void's for DeKoder
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
-	Serial.println(adres);
+	byte n;
+	n = decoder -DCC_adres;
+	switch (n) {
+	case 0:
+		if (port == true) {
+			etage_rq = channel-1;
+			ET_rq();
+			DSP_exe(12);
+			//Serial.println(channel-1);
+		}
+		break;
+	case 1:
+		if (port == true){
+			etage_rq = channel+3;
+			ET_rq();
+			DSP_exe(12);
+			//Serial.println(channel + 3);
+		}
+		break;
+	}
 }
 void start() {
 	if (GPIOR0 & (1 << 3)) {
@@ -513,7 +532,7 @@ void MEM_read() {
 	MEM_reg = EEPROM.read(102);
 	if (Vmax > 12) Vmax = 6;
 	DCC_adres = EEPROM.read(103);
-	if (DCC_adres == 0xFF)DCC_adres = 0;
+	if (DCC_adres == 0xFF)DCC_adres = 1;
 	for (byte i = 0; i < 8; i++) {
 		EEPROM.get(0 + (5 * i), etage[i]);
 		if (etage[i] == 0xFFFFFFFF)etage[i] = 0;
@@ -582,18 +601,21 @@ void SPD(byte step) {
 	OCR2A = SPD_speed;
 }
 void DSP_exe(byte txt) {
+	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
 	cd;
+	byte et;
+	et = etage_rq + 1;
 	switch (txt) {
 	case 10:
 		regelst; display.print("going home.....");
 		break;
 	case 12:
 		if (etage_status & (1 << etage_rq)) { //etage niet bepaald
-			regel1s; display.print("Etage "); display.print(etage_rq); display.print(" niet bepaald");
+			regel1s; display.print("Etage "); display.print(et); display.print(" niet bepaald");
 			regelb; display.print("*");
 		}
 		else { //etage bepaald
-			regelb; display.print(etage_rq);
+			regelb; display.print(et);
 			if (~GPIOR0 & (1 << 3)) { //motor uit
 				regelst; display.print("Stop");
 			}
@@ -601,10 +623,10 @@ void DSP_exe(byte txt) {
 		break;
 	case 15://keuze in te stellen etage
 		regel1s; display.print("etage instellen ");
-		regel2; display.print(etage_rq);
+		regel2; display.print(et);
 		break;
 	case 16: //instellen etage
-		regel1s; display.print("Instellen etage "); display.print(etage_rq);
+		regel1s; display.print("Instellen etage "); display.print(et);
 		//Serial.println(POS);
 		regel2; display.print(POS);
 		break;
@@ -638,10 +660,14 @@ void DSP_exe(byte txt) {
 		break;
 	case 60:
 		regel1s; display.println("DCC adres");
-		regel2; display.print((DCC_adres * 4)+1); regel2s; display.print("("); display.print(DCC_adres+1); display.print("-1)");
+		regel2; display.print(DCC_adres * 4 - 3); regel2s; display.print("("); display.print(DCC_adres); display.print("-1~");
+		display.print(DCC_adres + 1); display.print("-4)");
 		break;
 	}
+	
+	
 	display.display();
+	EIMSK |= (1 << INT0);
 }
 void DSP_prg() {
 	switch (PRG_fase) {
@@ -869,7 +895,8 @@ void SW_on(byte sw) {
 
 		break;
 	}
-}void SW_0(boolean onoff) { //up
+}
+void SW_0(boolean onoff) { //up
 	if (onoff) {
 		switch (PRG_fase) {
 		case 0:
@@ -903,6 +930,9 @@ void SW_on(byte sw) {
 				break;
 			}
 
+			break;
+		case 5:
+			SW_encoder(true);
 			break;
 		}
 	}
@@ -953,6 +983,9 @@ void SW_1(boolean onoff) { //down
 			break;
 		case 4: //diverse
 			//verhogen level 
+			break;
+		case 5:
+			SW_encoder(false);
 			break;
 		}
 	}
@@ -1019,23 +1052,11 @@ void ET_rq() {
 }
 void RUN_rq() {
 	if (GPIOR0 & (1 << 5)) {
-		//Serial.print("draait");
 		if (~GPIOR0 & (1 << 6)) {
-			//Serial.print("+");
 			GPIOR0 |= (1 << 6);
-			/*
-			if (GPIOR0 & (1 << 0)) {
-
-				POS_rq = POS - 3000; // SPD_dis;
-			}
-			else {
-				POS_rq = POS + 3000; // SPD_dis;
-			}
-*/
 		}
 	}
 	else {
-		//Serial.println("mag nu");
 		GPIOR0 &= ~(1 << 6);
 		POS_rq = etage[etage_rq];
 		if (POS < POS_rq) {
@@ -1045,11 +1066,9 @@ void RUN_rq() {
 			down;
 		}
 		if (POS != POS_rq)start();
-
 	}
 }
 void SW_encoder(boolean dir) {
-	//Serial.println(dir);
 	switch (PRG_fase) {
 	case 0:
 		ENC_select(dir);
@@ -1084,12 +1103,12 @@ void SW_encoder(boolean dir) {
 		break;
 	case 5: //DCC (decoder)adres
 		if (dir) {
-			DCC_adres--;if (DCC_adres > 250)DCC_adres = 250;
+			DCC_adres--; if (DCC_adres < 1)DCC_adres = 250;
 		}
 		else {
-			DCC_adres++; if (DCC_adres > 250)DCC_adres = 0;
+			DCC_adres++; if (DCC_adres > 250)DCC_adres = 1;
 		}
-		
+
 		DSP_exe(60);
 		break;
 	}
