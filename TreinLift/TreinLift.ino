@@ -416,19 +416,19 @@ void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff
 //**End void's for DeKoder
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
 	byte n;
-	n = decoder -DCC_adres;
+	n = decoder - DCC_adres;
 	switch (n) {
 	case 0:
 		if (port == true) {
-			etage_rq = channel-1;
+			etage_rq = channel - 1;
 			ET_rq();
 			DSP_exe(12);
 			//Serial.println(channel-1);
 		}
 		break;
 	case 1:
-		if (port == true){
-			etage_rq = channel+3;
+		if (port == true) {
+			etage_rq = channel + 3;
 			ET_rq();
 			DSP_exe(12);
 			//Serial.println(channel + 3);
@@ -466,12 +466,14 @@ void MOTOR() {
 	}
 	else {
 		PORTB &= ~(1 << 1);
+		RUN_home();
+		/*
 		if (~GPIOR0 & (1 << 0)) {
 			DSP_exe(21);
 		}
 		else {
-			RUN_home();
 		}
+*/
 	}
 }
 void RUN_home() { //move to HOME	
@@ -664,8 +666,8 @@ void DSP_exe(byte txt) {
 		display.print(DCC_adres + 1); display.print("-4)");
 		break;
 	}
-	
-	
+
+
 	display.display();
 	EIMSK |= (1 << INT0);
 }
@@ -1139,7 +1141,7 @@ void loop() {
 	//tbv dekoder
 	DEK_DCCh();
 	slowcount++;
-	if (slowcount == 0xFF) {
+	if (slowcount == 0XFF) {
 		count++;
 		if (count == 0) {
 			if (GPIOR0 & (1 << 6))RUN_rq();
