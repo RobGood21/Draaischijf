@@ -22,6 +22,10 @@ bit0  versnellen vertragen true default
 EEPROM
 0~5 etage[0]
 100 spotstatus
-101 Vmax
+101
 102 MEM_reg
 103 DCC decoder adres, default=0xFF;
+
+110 Vhome
+111 Vmin
+112 Vmax

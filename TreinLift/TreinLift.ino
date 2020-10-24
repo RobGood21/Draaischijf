@@ -6,6 +6,8 @@
  Design for train vertical fiddle yard. Treinlift
  Steppermotor 23HS5628-08 stepper driver TB6600
 
+
+ V1.02 Snelheid opgevoerd, standaard home speed en overall speed x2 verhouding in snelheidsstappen verder uiteen gehaald
 */
 
 
@@ -62,10 +64,13 @@ byte switchcount;
 byte PRG_fase;
 byte PRG_level;
 byte ENC_count;
-byte Vmax = 6;
+byte Vhome;
+byte Vmin;
+byte Vmax;
+
 byte count;
-volatile unsigned long SPD_dis;
-volatile byte SPD_disstep;
+int RPM_count; //counts a rotation
+int RPM_time;
 unsigned long runwait;
 
 void setup() {
@@ -107,8 +112,13 @@ void setup() {
 	//timer 2 settings on pin11 compare match
 	TCCR2A |= (1 << 6); //toggle pin6
 	TCCR2A |= (1 << 1);
-	//TCCR2B |= (1 << 3);
-	TCCR2B |= (2 << 0); //prescaler standaard
+
+
+	//geen instelling prescaler(TCCR2B bits 0,1,2) = 2x sneller
+	//TCCR2B |= (1 << 0); //afstelling V1.03
+	//TCCR2B |= (1 << 1); //2x langzamer
+
+
 	OCR2A = 255; //snelheid
 	//TIMSK2 |= (1 << 1); //enable interupt
 	//init
@@ -437,13 +447,23 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	}
 }
 void start() {
-	if (GPIOR0 & (1 << 3)) {
-		SPD_disstep = 13;
-		SPD_step = 6;
-		if (MEM_reg & (1 << 0)) SPD_step = 0;
-		GPIOR0 |= (1 << 4);
-		if (PRG_fase > 0)SPD_step = 6;
-		SPD(SPD_step);
+	RPM_count = 0;
+	RPM_time = 0;
+	if (GPIOR0 & (1 << 3)) { //motor aan
+		//SPD_disstep = 13;
+		//SPD_step = 7;
+		OCR2A = Vhome;
+		if (~GPIOR0 & (1 << 0)) { //naar home
+			if (PRG_fase == 0) OCR2A = Vmin; //versnellen/vertragen instelling er nog ij zetten
+		}
+
+
+		//if (MEM_reg & (1 << 0)) SPD_step = 0; //vertraging, versnellen aan
+		//GPIOR0 |= (1 << 4); //versnellen
+		//if (PRG_fase > 0)SPD_step = 7;
+		//SPD(SPD_step);
+
+		//start motor
 		TCCR2B |= (1 << 3);
 		TIMSK2 |= (1 << 1); //enable interupt 
 		GPIOR0 |= (1 << 5);
@@ -467,37 +487,23 @@ void MOTOR() {
 	else {
 		PORTB &= ~(1 << 1);
 		RUN_home();
-		/*
-		if (~GPIOR0 & (1 << 0)) {
-			DSP_exe(21);
-		}
-		else {
-		}
-*/
 	}
 }
 void RUN_home() { //move to HOME	
 	down;
-	GPIOR0 |= (1 << 0);
+	GPIOR0 |= (1 << 0); //home zoeken
 	start();
 	DSP_exe(10);
 }
 ISR(TIMER2_COMPA_vect) {
-	int sd;
-	if (POS_rq > POS) {
-		sd = POS_rq - POS;
-	}
-	else {
-		sd = POS - POS_rq;
-	}
-
 	if (GPIOR0 & (1 << 1)) {
 		POS++;
 	}
 	else {
 		POS--;
 	}
-	if (~GPIOR0 & (1 << 0)) {
+
+	if (~GPIOR0 & (1 << 0)) { //niet home 
 		if (POS == POS_rq) {
 			stop();
 			//Serial.println("stop");
@@ -506,21 +512,30 @@ ISR(TIMER2_COMPA_vect) {
 			stop();
 			//Serial.println("nul");
 		}
-	}
-	//vertraging
-	if (MEM_reg & (1 << 0) & PRG_fase == 0) {
-		if (~GPIOR0 & (1 << 0)) { //niet tijdens home
-			if (sd < SPD_dis) {
-				GPIOR0 &= ~(1 << 4); //stop versnellen		
-				if (SPD_disstep > SPD_step) {
-					SPD_step--;
-					SPD_disstep--;
-					SPD(SPD_step);
+
+		if (PRG_fase == 0) { //alleen bij in bedrijf, instelling nog erbij		
+			RPM_count++;
+			if (RPM_count > RPM_time) { // 1/4 rotatie
+				RPM_time = RPM_time + 2;
+				RPM_count = 0;
+				if (POS_rq - POS > 64000) { //ongeveer 1cm
+					FAST();
+				}
+				else { //binnen de 1cm
+					SLOW();
 				}
 			}
 		}
+
 	}
 }
+void FAST() {
+	if (OCR2A > Vmax) OCR2A--;
+}
+void SLOW() {
+
+}
+
 void FACTORY() {
 	//clears eeprom
 	Serial.println("factory");
@@ -530,77 +545,19 @@ void FACTORY() {
 }
 void MEM_read() {
 	etage_status = EEPROM.read(100);
-	Vmax = EEPROM.read(101);
+	Vhome = EEPROM.read(110);
+	if (Vhome == 0xFF)Vhome = 64;
+	Vmin = EEPROM.read(111);
+	if (Vmin == 0xFF)Vmin = 10;
+	Vmax = EEPROM.read(112);
 	MEM_reg = EEPROM.read(102);
-	if (Vmax > 12) Vmax = 6;
+	if (Vmax == 0xFF) Vmax = 20;
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
 	for (byte i = 0; i < 8; i++) {
 		EEPROM.get(0 + (5 * i), etage[i]);
 		if (etage[i] == 0xFFFFFFFF)etage[i] = 0;
 	}
-}
-void SPD(byte step) {
-	//Serial.print("step: "); Serial.println(step);// Serial.print("  Pos: "); Serial.println(POS);
-	switch (step) {
-	case 0:
-		//TCCR2B |= (7 << 0);
-		SPD_dis = 100;
-		SPD_speed = 255;
-		break;
-	case 1:
-		//TCCR2B |= (2 << 0);
-		SPD_dis = 250;
-		SPD_speed = 220;
-		break;
-	case 2:
-		//TCCR2B |= (2 << 0);
-		SPD_dis = 500;
-		SPD_speed = 180;
-		break;
-	case 3:
-		SPD_dis = 700;
-		SPD_speed = 150;
-		break;
-	case 4:
-		//TCCR2B |= (2 << 0);
-		SPD_dis = 900;
-		SPD_speed = 120;
-		break;
-	case 5:
-		SPD_dis = 1100;
-		SPD_speed = 90;
-		break;
-	case 6:
-		SPD_dis = 1250;
-		SPD_speed = 70;
-		break;
-	case 7:
-		SPD_dis = 1500;
-		SPD_speed = 60;
-		break;
-	case 8:
-		SPD_dis = 1800;
-		SPD_speed = 50;
-		break;
-	case 9:
-		SPD_dis = 2100;
-		SPD_speed = 40;
-		break;
-	case 10:
-		SPD_dis = 2400;
-		SPD_speed = 30;
-		break;
-	case 11:
-		SPD_dis = 2700;
-		SPD_speed = 20;
-		break;
-	case 12:
-		SPD_dis = 3000;
-		SPD_speed = 10;
-		break;
-	}
-	OCR2A = SPD_speed;
 }
 void DSP_exe(byte txt) {
 	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
@@ -643,8 +600,19 @@ void DSP_exe(byte txt) {
 		regel2; display.print(POS);
 		break;
 	case 40:
-		regel1s; display.print("max snelheid");
-		regel2; display.print(Vmax);
+		regel1s; display.print("Snelheid"); regel2;
+		switch (PRG_level) {
+		case 0:
+			display.print("Vhome: "); display.print(Vhome);
+			break;
+		case 1:
+			display.print("Vmin: "); display.print(Vmin);
+			break;
+		case 2:
+			display.print("Vmax: "); display.print(Vmax);
+			break;
+		}
+
 		break;
 	case 50:
 		regel1s; display.print("Diverse ");
@@ -717,20 +685,24 @@ void SW_read() { //lezen van schakelaars
 	//Dit werkt alleen met pullups naar 5V van 1K (interne pullup is te zwak)
 	byte sr; byte changed; byte v;
 	switchcount++;
-	if (GPIOR0 & (1 << 0)) {
+
+	/* oude proces voor versnellen
+
+	if (GPIOR0 & (1 << 0)) { //nulpunt zoeken
 		v = 4;
 	}
 	else {
 		v = Vmax;
 	}
-	if (MEM_reg & (1 << 0) & PRG_fase == 0) {
+
+	if (MEM_reg & (1 << 0) & PRG_fase == 0) { //normaal in bedrijf
 		if (GPIOR0 & (1 << 4)) {//versnellen
 			speedcount++;
 			if (speedcount > 500) {
 				speedcount = 0;
 				if (SPD_step < v) {
 					SPD_step++;
-					SPD(SPD_step);
+					//SPD(SPD_step);
 				}
 				else {
 					GPIOR0 &= ~(1 << 4);
@@ -738,6 +710,9 @@ void SW_read() { //lezen van schakelaars
 			}
 		}
 	}
+*/
+
+
 	if (switchcount > 2)switchcount = 0;
 	DDRD &= ~(B11100000); //set H-z
 	switch (switchcount) {
@@ -901,10 +876,10 @@ void SW_on(byte sw) {
 void SW_0(boolean onoff) { //up
 	if (onoff) {
 		switch (PRG_fase) {
-		case 0:
+		case 0: //in bedrijf
 			SW_encoder(true);
 			break;
-		case 1: //handmatig
+		case 1: //handmatig instellen
 			up;
 			start();
 			break;
@@ -919,8 +894,10 @@ void SW_0(boolean onoff) { //up
 				break;
 			}
 			break;
-		case 3:
-			SW_encoder(true);
+		case 3: //snelheid instellen
+			PRG_level++;
+			if (PRG_level > 2)PRG_level = 0;
+			DSP_exe(40);
 			break;
 		case 4:
 			switch (PRG_level) {
@@ -980,7 +957,7 @@ void SW_1(boolean onoff) { //down
 				break;
 			}
 			break;
-		case 3: //instellen Vmax
+		case 3: //instellen snelheid
 			SW_encoder(false);
 			break;
 		case 4: //diverse
@@ -1012,12 +989,15 @@ void SW_2() {
 	case 0: //n bedrijf
 		MOTOR();
 		break;
-	case 2: //installen etages
+	case 2: //instellen etages
 		PRG_level++;
 		DSP_prg();
 		break;
-	case 3: //instellen Vmax
-		EEPROM.update(101, Vmax);
+	case 3: //instellen snelheden
+		EEPROM.update(110, Vhome);
+		EEPROM.update(111, Vmin);
+		EEPROM.update(112, Vmax);
+		OCR2A = Vhome;
 		PRG_fase = 0;
 		DSP_prg();
 		break;
@@ -1093,13 +1073,32 @@ void SW_encoder(boolean dir) {
 			break;
 		}
 		break;
-	case 3: //vmax instellen
+	case 3: //snelheid instellen
 		if (dir) {
-			if (Vmax > 1)Vmax--;
+			switch (PRG_level) {
+			case 0:
+				Vhome--;
+				break;
+			case 1:
+				Vmin--;
+				break;
+			case 2:
+				Vmax--;
+				break;
+			}
 		}
 		else {
-			if (Vmax < 12) Vmax++;
-
+			switch (PRG_level) {
+			case 0:
+				Vhome++;
+				break;
+			case 1:
+				Vmin++;
+				break;
+			case 2:
+				Vmax++;
+				break;
+			}
 		}
 		DSP_exe(40);
 		break;
