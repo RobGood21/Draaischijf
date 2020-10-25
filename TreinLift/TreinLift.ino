@@ -49,16 +49,11 @@ byte DCC_adres;
 
 byte COM_reg;
 byte slowcount;
-unsigned int speedcount;
-byte SPD_step;
-byte SPD_speed;
-byte SPD_act;
 volatile unsigned long POS;
 volatile unsigned long POS_rq;
 volatile unsigned long etage[8];
 byte etage_status; //bit0 false positie bepaald, enz lezen eeprom 100
 byte etage_rq;
-byte MEM_reg;
 byte switchstatus[3];
 byte switchcount;
 byte PRG_fase;
@@ -69,8 +64,8 @@ byte Vmin;
 byte Vmax;
 
 byte count;
-int RPM_count; //counts a rotation
-int RPM_time;
+byte RPM_time;
+volatile unsigned long RPM_pos;
 unsigned long runwait;
 
 void setup() {
@@ -101,10 +96,10 @@ void setup() {
 	PORTC |= (15 << 0); //pullup  A0~A3
 	DDRB |= (15 << 0); //Pin8~Pin11 as outputs
 	PINB |= (1 << 0); //set pin8
-	//DDRD |= (B11100000 << 0); //pin 7,6,5 output
+	DDRD |= (B11100000 << 0); //pin 7,6,5 output
 	//factory reset
 	DDRD |= (1 << 7);
-	//Serial.println(PINC);
+	Serial.println(PINC);
 	if (PINC == 54) {
 		FACTORY();
 		delay(500);
@@ -115,7 +110,7 @@ void setup() {
 
 
 	//geen instelling prescaler(TCCR2B bits 0,1,2) = 2x sneller
-	//TCCR2B |= (1 << 0); //afstelling V1.03
+	TCCR2B |= (1 << 0); //afstelling V1.03
 	//TCCR2B |= (1 << 1); //2x langzamer
 
 
@@ -447,22 +442,14 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	}
 }
 void start() {
-	RPM_count = 0;
 	RPM_time = 0;
 	if (GPIOR0 & (1 << 3)) { //motor aan
-		//SPD_disstep = 13;
-		//SPD_step = 7;
 		OCR2A = Vhome;
 		if (~GPIOR0 & (1 << 0)) { //naar home
 			if (PRG_fase == 0) OCR2A = Vmin; //versnellen/vertragen instelling er nog ij zetten
 		}
-
-
-		//if (MEM_reg & (1 << 0)) SPD_step = 0; //vertraging, versnellen aan
-		//GPIOR0 |= (1 << 4); //versnellen
-		//if (PRG_fase > 0)SPD_step = 7;
-		//SPD(SPD_step);
-
+		GPIOR0 |= (1 << 4); //versnellen	
+		RPM_pos = 50000;
 		//start motor
 		TCCR2B |= (1 << 3);
 		TIMSK2 |= (1 << 1); //enable interupt 
@@ -496,13 +483,13 @@ void RUN_home() { //move to HOME
 	DSP_exe(10);
 }
 ISR(TIMER2_COMPA_vect) {
-	if (GPIOR0 & (1 << 1)) {
+	unsigned int dis;
+	if (GPIOR0 & (1 << 1)) { //true is omlaag
 		POS++;
 	}
-	else {
+	else { //false is omlaag
 		POS--;
 	}
-
 	if (~GPIOR0 & (1 << 0)) { //niet home 
 		if (POS == POS_rq) {
 			stop();
@@ -514,28 +501,53 @@ ISR(TIMER2_COMPA_vect) {
 		}
 
 		if (PRG_fase == 0) { //alleen bij in bedrijf, instelling nog erbij		
-			RPM_count++;
-			if (RPM_count > RPM_time) { // 1/4 rotatie
-				RPM_time = RPM_time + 2;
-				RPM_count = 0;
-				if (POS_rq - POS > 64000) { //ongeveer 1cm
-					FAST();
+
+			if (GPIOR0 & (1 << 4))FAST(); //versnellen aangezet in start
+
+			if (GPIOR0 & (1 << 1)) { //omhoog vertraging berekenen
+				if (POS_rq - RPM_pos == POS) {
+					GPIOR0 &= ~(1 << 4);
+					RPM_pos = RPM_pos - (RPM_pos / (Vmin - OCR2A));
+					RPM_pos = RPM_pos - ((Vmin - OCR2A) * 5);
+					OCR2A++;
 				}
-				else { //binnen de 1cm
-					SLOW();
+			}
+			else { //omlaag, vertraging berekenen
+				if (POS_rq + RPM_pos == POS) {
+					GPIOR0 &= ~(1 << 4);
+					RPM_pos = RPM_pos - (RPM_pos / (Vmin - OCR2A));
+					RPM_pos = RPM_pos - ((Vmin - OCR2A) * 5);
+					OCR2A++;
 				}
+
 			}
 		}
 
 	}
 }
 void FAST() {
-	if (OCR2A > Vmax) OCR2A--;
+	unsigned long dis;
+	if (GPIOR0 & (1 << 1)) {
+		dis = POS_rq - POS;
+	}
+	else {
+		dis = POS - POS_rq;
+	}
+	if (dis > RPM_pos) {
+		if (OCR2A > Vmax) {
+			//RPM_count ++;
+			//if (RPM_count >10) { //Vmin - OCR2A){ //RPM_time) { // 1/4 rotatie
+				//RPM_count = 0;
+			if (GPIOR1 & (1 << 0)) {
+				OCR2A--;
+				GPIOR1 &= ~(1 << 0);
+			}
+		}
+	}
+	else {
+		OCR2A = Vhome;
+	}
 }
-void SLOW() {
-
-}
-
 void FACTORY() {
 	//clears eeprom
 	Serial.println("factory");
@@ -544,20 +556,33 @@ void FACTORY() {
 	}
 }
 void MEM_read() {
-	etage_status = EEPROM.read(100);
+
 	Vhome = EEPROM.read(110);
-	if (Vhome == 0xFF)Vhome = 64;
+	if (Vhome == 0xFF)Vhome = 20;
 	Vmin = EEPROM.read(111);
-	if (Vmin == 0xFF)Vmin = 10;
+	if (Vmin == 0xFF)Vmin = 100;
 	Vmax = EEPROM.read(112);
-	MEM_reg = EEPROM.read(102);
-	if (Vmax == 0xFF) Vmax = 20;
+	if (Vmax == 0xFF)Vmax = 5;
+
+	//MEM_reg = EEPROM.read(102);
+	
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
+
 	for (byte i = 0; i < 8; i++) {
 		EEPROM.get(0 + (5 * i), etage[i]);
-		if (etage[i] == 0xFFFFFFFF)etage[i] = 0;
+		if (etage[i] == 0xFFFFFFFF) {
+			if (i == 0) {
+				etage[i] = 20000;
+			}
+			else {
+				etage[i] = 20000 + (i * 420000);
+			}
+		}
 	}
+
+	etage_status = EEPROM.read(100);
+	if (etage_status == 0xFF)etage_status = 0;
 }
 void DSP_exe(byte txt) {
 	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
@@ -618,13 +643,7 @@ void DSP_exe(byte txt) {
 		regel1s; display.print("Diverse ");
 		switch (PRG_level) {
 		case 0:
-			display.print("versnellen"); regel2;
-			if (MEM_reg & (1 << 0)) {
-				display.print("Ja");
-			}
-			else {
-				display.println("nee");
-			}
+			display.print("");display.print("Geen functie");	
 			break;
 		}
 		break;
@@ -685,34 +704,6 @@ void SW_read() { //lezen van schakelaars
 	//Dit werkt alleen met pullups naar 5V van 1K (interne pullup is te zwak)
 	byte sr; byte changed; byte v;
 	switchcount++;
-
-	/* oude proces voor versnellen
-
-	if (GPIOR0 & (1 << 0)) { //nulpunt zoeken
-		v = 4;
-	}
-	else {
-		v = Vmax;
-	}
-
-	if (MEM_reg & (1 << 0) & PRG_fase == 0) { //normaal in bedrijf
-		if (GPIOR0 & (1 << 4)) {//versnellen
-			speedcount++;
-			if (speedcount > 500) {
-				speedcount = 0;
-				if (SPD_step < v) {
-					SPD_step++;
-					//SPD(SPD_step);
-				}
-				else {
-					GPIOR0 &= ~(1 << 4);
-				}
-			}
-		}
-	}
-*/
-
-
 	if (switchcount > 2)switchcount = 0;
 	DDRD &= ~(B11100000); //set H-z
 	switch (switchcount) {
@@ -901,8 +892,7 @@ void SW_0(boolean onoff) { //up
 			break;
 		case 4:
 			switch (PRG_level) {
-			case 0:
-				MEM_reg ^= (1 << 0);
+			case 0:				
 				DSP_exe(50);
 				break;
 			case 1:
@@ -1001,8 +991,7 @@ void SW_2() {
 		PRG_fase = 0;
 		DSP_prg();
 		break;
-	case 4://diverse
-		EEPROM.update(102, MEM_reg);
+	case 4://diverse		
 		PRG_fase = 0;
 		DSP_prg();
 		break;
@@ -1147,6 +1136,10 @@ void loop() {
 			if (COM_reg & (1 << 0))ET_rq();
 		}
 		SW_read();
-
+		RPM_time++;
+		if (RPM_time > 10 + (Vmin - OCR2A)) {
+			GPIOR1 |= (1 << 0);
+			RPM_time = 0;
+		}
 	}
 }
