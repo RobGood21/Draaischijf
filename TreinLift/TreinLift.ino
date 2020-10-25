@@ -8,13 +8,21 @@
 
 
  V1.02 Snelheid opgevoerd, standaard home speed en overall speed x2 verhouding in snelheidsstappen verder uiteen gehaald
+ V2.0
+ gehele snelheid methodiek veranderd. Mem_reg diverse, versnellen/vertragen verwijderd. 
+ Factory reset aangepast vult automatisch de 8 etages. (onegeveer 10cm bij 1.5mm per rotatie.
+ Motor snelheid afgeregeld op full microstep 6400 steps voor 1 rotatie
+ Schakelaar en encoder leessnelheid gehalveerd, meer tegengaan denderen contacten
+ Toegevoegd in menu instellingen voor Vhome, Vmin
+ Snelheid wordt in display geinverteerd weergeven 
+ Library splah.h en wire.h uitgezet
 */
 
 
 #include <EEPROM.h>
-#include <Wire.h>
+//#include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <splash.h>
+//#include <splash.h>
 #include <Adafruit_SSD1306.h>
 
 #define cd display.clearDisplay()
@@ -56,6 +64,7 @@ byte etage_status; //bit0 false positie bepaald, enz lezen eeprom 100
 byte etage_rq;
 byte switchstatus[3];
 byte switchcount;
+unsigned long SW_slow;
 byte PRG_fase;
 byte PRG_level;
 byte ENC_count;
@@ -565,7 +574,7 @@ void MEM_read() {
 	if (Vmax == 0xFF)Vmax = 5;
 
 	//MEM_reg = EEPROM.read(102);
-	
+
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
 
@@ -628,13 +637,13 @@ void DSP_exe(byte txt) {
 		regel1s; display.print("Snelheid"); regel2;
 		switch (PRG_level) {
 		case 0:
-			display.print("Vhome: "); display.print(Vhome);
+			display.print("Vhome: "); display.print(255-Vhome);
 			break;
 		case 1:
-			display.print("Vmin: "); display.print(Vmin);
+			display.print("Vmin: "); display.print(255-Vmin);
 			break;
 		case 2:
-			display.print("Vmax: "); display.print(Vmax);
+			display.print("Vmax: "); display.print(255-Vmax);
 			break;
 		}
 
@@ -643,7 +652,7 @@ void DSP_exe(byte txt) {
 		regel1s; display.print("Diverse ");
 		switch (PRG_level) {
 		case 0:
-			display.print("");display.print("Geen functie");	
+			display.print(""); display.print("Geen functie");
 			break;
 		}
 		break;
@@ -654,7 +663,7 @@ void DSP_exe(byte txt) {
 		break;
 	}
 
-
+	display.fillRect(80, 50, 128, 64, BLACK);
 	display.display();
 	EIMSK |= (1 << INT0);
 }
@@ -892,7 +901,7 @@ void SW_0(boolean onoff) { //up
 			break;
 		case 4:
 			switch (PRG_level) {
-			case 0:				
+			case 0:
 				DSP_exe(50);
 				break;
 			case 1:
@@ -1135,7 +1144,13 @@ void loop() {
 			if (GPIOR0 & (1 << 6))RUN_rq();
 			if (COM_reg & (1 << 0))ET_rq();
 		}
-		SW_read();
+
+		GPIOR1 ^= (1 << 1); //   //2 encoder werkt slechter schakelaars denderen minder
+		if (GPIOR1 & (1<<1))SW_read();
+		
+
+
+
 		RPM_time++;
 		if (RPM_time > 10 + (Vmin - OCR2A)) {
 			GPIOR1 |= (1 << 0);

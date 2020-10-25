@@ -19,7 +19,7 @@ bit7 divider voor encoder
 
 GPIOR1
 bit0 timer versnellen vertragen
-bit1 free
+bit1 divider sw read speed
 
 MEM_reg 
 bit0  free
