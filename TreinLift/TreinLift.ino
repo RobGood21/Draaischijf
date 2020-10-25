@@ -1075,19 +1075,6 @@ void SW_encoder(boolean dir) {
 		if (dir) {
 			switch (PRG_level) {
 			case 0:
-				Vhome--;
-				break;
-			case 1:
-				Vmin--;
-				break;
-			case 2:
-				Vmax--;
-				break;
-			}
-		}
-		else {
-			switch (PRG_level) {
-			case 0:
 				Vhome++;
 				break;
 			case 1:
@@ -1095,6 +1082,19 @@ void SW_encoder(boolean dir) {
 				break;
 			case 2:
 				Vmax++;
+				break;
+			}
+		}
+		else {
+			switch (PRG_level) {
+			case 0:
+				Vhome--;
+				break;
+			case 1:
+				Vmin--;
+				break;
+			case 2:
+				Vmax--;
 				break;
 			}
 		}
@@ -1147,9 +1147,6 @@ void loop() {
 
 		GPIOR1 ^= (1 << 1); //   //2 encoder werkt slechter schakelaars denderen minder
 		if (GPIOR1 & (1<<1))SW_read();
-		
-
-
 
 		RPM_time++;
 		if (RPM_time > 10 + (Vmin - OCR2A)) {
