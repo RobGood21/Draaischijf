@@ -8,7 +8,7 @@
 
 
  V1.02 Snelheid opgevoerd, standaard home speed en overall speed x2 verhouding in snelheidsstappen verder uiteen gehaald
- V2.0
+ V2.01
  gehele snelheid methodiek veranderd. Mem_reg diverse, versnellen/vertragen verwijderd. 
  Factory reset aangepast vult automatisch de 8 etages. (onegeveer 10cm bij 1.5mm per rotatie.
  Motor snelheid afgeregeld op full microstep 6400 steps voor 1 rotatie
@@ -16,13 +16,18 @@
  Toegevoegd in menu instellingen voor Vhome, Vmin
  Snelheid wordt in display geinverteerd weergeven 
  Library splah.h en wire.h uitgezet
+ V2.02
+ Versie hardware op baseren project TurnTable V1.01
+ Toegevoegd uitgang nog te definieren, tijdelijk op lock, als brug nieuwe positie vraag krijgt
+ gaat uitgang laag als brug in rust is gaat uitgang aan.
+
 */
 
 
 #include <EEPROM.h>
-//#include <Wire.h>
+#include <Wire.h>
 #include <Adafruit_GFX.h>
-//#include <splash.h>
+#include <splash.h>
 #include <Adafruit_SSD1306.h>
 
 #define cd display.clearDisplay()
@@ -71,12 +76,10 @@ byte ENC_count;
 byte Vhome;
 byte Vmin;
 byte Vmax;
-
 byte count;
 byte RPM_time;
 volatile unsigned long RPM_pos;
 unsigned long runwait;
-
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -105,7 +108,7 @@ void setup() {
 	PORTC |= (15 << 0); //pullup  A0~A3
 	DDRB |= (15 << 0); //Pin8~Pin11 as outputs
 	PINB |= (1 << 0); //set pin8
-	DDRD |= (B11100000 << 0); //pin 7,6,5 output
+	DDRD |= (B11110000 << 0); //pin 7,6,5,4 output
 	//factory reset
 	DDRD |= (1 << 7);
 	Serial.println(PINC);
@@ -451,6 +454,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	}
 }
 void start() {
+	PORTD &= ~(1 << 4); //free lock
 	RPM_time = 0;
 	if (GPIOR0 & (1 << 3)) { //motor aan
 		OCR2A = Vhome;
@@ -472,6 +476,8 @@ void stop() {
 	GPIOR0 &= ~(1 << 4);
 	GPIOR0 &= ~(1 << 5);
 	PORTB &= ~(1 << 0); //bezetled 
+	
+
 }
 void MOTOR() {
 	GPIOR0 ^= (1 << 3);
@@ -502,6 +508,7 @@ ISR(TIMER2_COMPA_vect) {
 	if (~GPIOR0 & (1 << 0)) { //niet home 
 		if (POS == POS_rq) {
 			stop();
+			PORTD |= (1 << 4); //lock bridge on
 			//Serial.println("stop");
 		}
 		if (POS == 0) {
@@ -1019,6 +1026,7 @@ void SW_3() {
 }
 void ET_rq() {
 	//Serial.println("*");
+	PORTD &= ~(1 << 4); //free lock at new position request
 	if (~COM_reg & (1 << 0)) {
 		COM_reg |= ((1 << 0));
 		runwait = millis();
