@@ -59,16 +59,13 @@ byte DEK_Buf4[6];
 byte DEK_Buf5[6];
 //**End declaration for deKoder
 byte DCC_adres;
-
 byte COM_reg;
 byte slowcount;
 unsigned long POS;
 unsigned long POS_rq;
 unsigned long POS_acc; //aantal stappen tussen afrem posities
 unsigned long POS_calc; //afrem positie
-
-
-volatile unsigned long etage[8];
+volatile unsigned long etage[16];
 byte etage_status; //bit0 false positie bepaald, enz lezen eeprom 100
 byte etage_rq;
 byte switchstatus[3];
@@ -79,14 +76,12 @@ byte ENC_count;
 byte Vhome;
 byte Vmin;
 byte Vmax;
+byte Vstep; //instelling prescaler 64;128;259;1024
 byte count;
-//volatile unsigned long RPM_pos;
 unsigned long runwait;
-
 byte accSec = 3; //ingestelde acceleratietijd in seconden
 float accStep; //berekende tijd per snelheids step in microsec
 float puls;
-int prescale = 64;
 unsigned long accTijd; //verstreken tijd
 
 void setup() {
@@ -128,14 +123,8 @@ void setup() {
 	//timer 2 settings on pin11 compare match
 	TCCR2A |= (1 << 6); //toggle pin6
 	TCCR2A |= (1 << 1);
-
-
-	//prescaler
-
 	TCCR2B |= (1 << 2); //prescaler always 4  on(default true???)
-
 	OCR2A = 255; //snelheid
-	//TIMSK2 |= (1 << 1); //enable interupt
 	//init
 	switchstatus[0] = 0xFF;
 	switchstatus[1] = 0xFF;
@@ -485,15 +474,27 @@ void start() {
 			}
 			//richting en POS_calc instellen
 			if (GPIOR0 & (1 << 1)) { //up
-				POS_calc = POS_rq - POS_acc;
+				if ((POS_rq - POS)/2 <= POS_acc) {
+					//Serial.println("kleiner");
+					POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
+				}
+				else {
+					POS_calc = POS_rq - POS_acc;
+				}
 			}
 			else { //down
-				POS_calc = POS_rq + POS_acc;
+				if ((POS - POS_rq)/2 <= POS_acc) {
+					//Serial.println("groter");
+					POS_calc = POS_rq + ((POS - POS_rq) / 2);
+				}
+				else {
+					POS_calc = POS_rq + POS_acc;
+				}
 			}
-			Serial.print(F("POS_acc: "));  Serial.println(POS_acc);
-			Serial.print("POS: "); Serial.println(POS);
-			Serial.print("POS_rq: "); Serial.println(POS_rq);
-			Serial.print("POS_calc: "); Serial.println(POS_calc);
+			//Serial.print(F("POS_acc: "));  Serial.println(POS_acc);
+			//Serial.print("POS: "); Serial.println(POS);
+			//Serial.print("POS_rq: "); Serial.println(POS_rq);
+			//Serial.print("POS_calc: "); Serial.println(POS_calc);
 		}
 
 
@@ -558,7 +559,6 @@ ISR(TIMER2_COMPA_vect) {
 		}
 	}
 }
-
 void FAST() { //versnellen tijd gebaseerd
 	if (millis() - accTijd > accStep) {
 		//Serial.print("*");
@@ -570,8 +570,9 @@ void FAST() { //versnellen tijd gebaseerd
 void SLOW() { //vertragen positie en tijd gebaseerd, called from loop 
 	Serial.print("<");
 	GPIOR1 &= ~(1 << 1); //reset bit thats calls SLOW()
+	GPIOR0 &= ~(1 << 4); //reset versnelling
 //aantal stappen berekenen met deze snelheid. 
-	if(OCR2A < Vmin) OCR2A++;
+	if (OCR2A < Vmin) OCR2A++;
 	POS_acc = (accStep * 1000) / (puls*OCR2A);
 	//richting
 	if (GPIOR0 & (1 << 1)) { //going up
@@ -581,7 +582,6 @@ void SLOW() { //vertragen positie en tijd gebaseerd, called from loop
 		POS_calc = POS - POS_acc;
 	}
 }
-
 void FACTORY() {
 	//clears eeprom
 	Serial.println("factory");
@@ -590,16 +590,14 @@ void FACTORY() {
 	}
 }
 void MEM_read() {
-
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 20;
 	Vmin = EEPROM.read(111);
 	if (Vmin == 0xFF)Vmin = 100;
 	Vmax = EEPROM.read(112);
 	if (Vmax == 0xFF)Vmax = 5;
-
-	//MEM_reg = EEPROM.read(102);
-
+	Vstep = EEPROM.read(113);
+	if (Vstep > 3) Vstep = 3;
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
 
@@ -617,16 +615,26 @@ void MEM_read() {
 
 	etage_status = EEPROM.read(100);
 	if (etage_status == 0xFF)etage_status = 0;
-
-
-	//prescaler
-	TCCR2B |= (1 << 0); //afstelling V1.03
-	TCCR2B |= (1 << 1);
-
-	//tijd berekenen
+	COM_V();
+}
+void COM_V() { //diverse berekeningen voor snelheid
+	TCCR2B |= (Vstep << 0); //prescaler
+	switch (Vstep) {
+	case 0:
+		puls = 64 * 0.0625;
+		break;
+	case 1:
+		puls = 128 * 0.0625;
+		break;
+	case 2:
+		puls = 256 * 0.0625;
+		break;
+	case 3:
+		puls = 1024 * 0.0625;
+		break;
+	}
+	//tijd berekenen van 1 vertraag stap
 	accStep = accSec * 1000 / (Vmin - Vmax);
-	puls = prescale * 0.0625;
-
 }
 void DSP_exe(byte txt) {
 	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
@@ -679,6 +687,9 @@ void DSP_exe(byte txt) {
 			break;
 		case 2:
 			display.print(F("Vmax: ")); display.print(255 - Vmax);
+			break;
+		case 3:
+			display.print(F("Vstep: ")); display.print(Vstep + 1);
 			break;
 		}
 
@@ -821,7 +832,6 @@ void SW_off(byte sw) {
 		break;
 	}
 }
-
 void SW_on(byte sw) {
 	//Serial.println(sw);
 	switch (sw) {
@@ -933,9 +943,11 @@ void SW_0(boolean onoff) { //up
 			break;
 		case 3: //snelheid instellen
 			PRG_level++;
-			if (PRG_level > 2)PRG_level = 0;
+
+			if (PRG_level > 3)PRG_level = 0;
 			DSP_exe(40);
 			break;
+
 		case 4:
 			switch (PRG_level) {
 			case 0:
@@ -1033,6 +1045,8 @@ void SW_2() {
 		EEPROM.update(110, Vhome);
 		EEPROM.update(111, Vmin);
 		EEPROM.update(112, Vmax);
+		EEPROM.update(113, Vstep);
+		COM_V();
 		OCR2A = Vhome;
 		PRG_fase = 0;
 		DSP_prg();
@@ -1121,6 +1135,10 @@ void SW_encoder(boolean dir) {
 			case 2:
 				Vmax++;
 				break;
+			case 3:
+				Vstep--;
+				if (Vstep > 3) Vstep = 3;
+				break;
 			}
 		}
 		else {
@@ -1133,6 +1151,10 @@ void SW_encoder(boolean dir) {
 				break;
 			case 2:
 				Vmax--;
+				break;
+			case 3:
+				Vstep++;
+				if (Vstep > 3)Vstep = 0;
 				break;
 			}
 		}
@@ -1172,12 +1194,11 @@ void ENC_select(boolean dir) {
 		if (etage_rq > 7)etage_rq = 7;
 	}
 }
-
 void loop() {
 	//tbv dekoder
 	DEK_DCCh();
 	slowcount++;
-	if (slowcount == 0XFF) { 
+	if (slowcount == 0XFF) {
 
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
 		if (GPIOR1 & (1 << 1))SLOW(); //vertragen
