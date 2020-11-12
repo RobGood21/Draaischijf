@@ -9,15 +9,15 @@
 
  V1.02 Snelheid opgevoerd, standaard home speed en overall speed x2 verhouding in snelheidsstappen verder uiteen gehaald
  V2.01
- gehele snelheid methodiek veranderd. Mem_reg diverse, versnellen/vertragen verwijderd. 
+ gehele snelheid methodiek veranderd. Mem_reg diverse, versnellen/vertragen verwijderd.
  Factory reset aangepast vult automatisch de 8 etages. (onegeveer 10cm bij 1.5mm per rotatie.
  Motor snelheid afgeregeld op full microstep 6400 steps voor 1 rotatie
  Schakelaar en encoder leessnelheid gehalveerd, meer tegengaan denderen contacten
  Toegevoegd in menu instellingen voor Vhome, Vmin
- Snelheid wordt in display geinverteerd weergeven 
+ Snelheid wordt in display geinverteerd weergeven
  Library splah.h en wire.h uitgezet
  V2.02
- Versie hardware op baseren project TurnTable V1.01
+ Versie hardware op baseren project TurN V1.01
  Toegevoegd uitgang nog te definieren, tijdelijk op lock, als brug nieuwe positie vraag krijgt
  gaat uitgang laag als brug in rust is gaat uitgang aan.
 
@@ -45,7 +45,7 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 //**Declaraties for DeKoder
 volatile unsigned long DEK_Tperiode; //laatst gemeten tijd 
 volatile unsigned int DEK_duur; //gemeten duur van periode tussen twee interupts
-boolean DEK_Monitor = false; //shows DCC commands as bytes
+//boolean DEK_Monitor = false; //shows DCC commands as bytes
 byte DEK_Reg; //register voor de decoder 
 byte DEK_Status = 0;
 byte DEK_byteRX[6]; //max length commandoos for this decoder 6 bytes (5x data 1x error check)
@@ -62,14 +62,17 @@ byte DCC_adres;
 
 byte COM_reg;
 byte slowcount;
-volatile unsigned long POS;
-volatile unsigned long POS_rq;
+unsigned long POS;
+unsigned long POS_rq;
+unsigned long POS_acc; //aantal stappen tussen afrem posities
+unsigned long POS_calc; //afrem positie
+
+
 volatile unsigned long etage[8];
 byte etage_status; //bit0 false positie bepaald, enz lezen eeprom 100
 byte etage_rq;
 byte switchstatus[3];
 byte switchcount;
-unsigned long SW_slow;
 byte PRG_fase;
 byte PRG_level;
 byte ENC_count;
@@ -77,9 +80,15 @@ byte Vhome;
 byte Vmin;
 byte Vmax;
 byte count;
-byte RPM_time;
-volatile unsigned long RPM_pos;
+//volatile unsigned long RPM_pos;
 unsigned long runwait;
+
+byte accSec = 3; //ingestelde acceleratietijd in seconden
+float accStep; //berekende tijd per snelheids step in microsec
+float puls;
+int prescale = 64;
+unsigned long accTijd; //verstreken tijd
+
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -96,12 +105,12 @@ void setup() {
 
 
 	cd; //clear display
-	DSP_settxt(10, 30, 1); display.print("www.wisselmotor.nl");
+	DSP_settxt(10, 30, 1); display.print(F("www.wisselmotor.nl"));
 	//regel2; display.print("Treinlift");
 	display.display();
 	delay(500);
 	cd;
-	regel2; display.print("TreinLift");
+	regel2; display.print(F("TreinLift"));
 	display.display();
 	delay(500);
 	//ports
@@ -111,7 +120,7 @@ void setup() {
 	DDRD |= (B11110000 << 0); //pin 7,6,5,4 output
 	//factory reset
 	DDRD |= (1 << 7);
-	Serial.println(PINC);
+	//Serial.println(PINC);
 	if (PINC == 54) {
 		FACTORY();
 		delay(500);
@@ -121,10 +130,9 @@ void setup() {
 	TCCR2A |= (1 << 1);
 
 
-	//geen instelling prescaler(TCCR2B bits 0,1,2) = 2x sneller
-	TCCR2B |= (1 << 0); //afstelling V1.03
-	//TCCR2B |= (1 << 1); //2x langzamer
+	//prescaler
 
+	TCCR2B |= (1 << 2); //prescaler always 4  on(default true???)
 
 	OCR2A = 255; //snelheid
 	//TIMSK2 |= (1 << 1); //enable interupt
@@ -326,6 +334,8 @@ void DEK_DCCh() { //handles incoming DCC commands, called from loop()
 			value = 0;
 		}
 		COM_exe(bitRead(DEK_BufReg[n], 0), decoder, channel, port, onoff, cv, value);
+
+		/*
 		//Show Monitor (bytes)
 		if (DEK_Monitor == true) {
 			Serial.print("buffer= ");
@@ -410,6 +420,10 @@ void DEK_DCCh() { //handles incoming DCC commands, called from loop()
 			Serial.println("------");
 
 		}
+		*/
+
+
+
 		//clear buffer
 		DEK_BufReg[n] = 0;
 		DEK_Buf0[n] = 0;
@@ -455,14 +469,34 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 }
 void start() {
 	PORTD &= ~(1 << 4); //free lock
-	RPM_time = 0;
 	if (GPIOR0 & (1 << 3)) { //motor aan
 		OCR2A = Vhome;
-		if (~GPIOR0 & (1 << 0)) { //naar home
+		if (~GPIOR0 & (1 << 0)) { //Not while going Home
 			if (PRG_fase == 0) OCR2A = Vmin; //versnellen/vertragen instelling er nog ij zetten
+			GPIOR0 |= (1 << 4); //versnellen	
+			//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
+			//prescaler 64;128;256;1024 (100 101 110 111) bit 3 altijd true? nog in EEPROM MEM
+			//aantal steps berekenen
+			POS_acc = 0;
+			for (byte i = Vmax; i <= Vmin; i++) {
+				//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
+				//accStep duur van 1 snelheidstap in milisec from MEM_read()
+				POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+			}
+			//richting en POS_calc instellen
+			if (GPIOR0 & (1 << 1)) { //up
+				POS_calc = POS_rq - POS_acc;
+			}
+			else { //down
+				POS_calc = POS_rq + POS_acc;
+			}
+			Serial.print(F("POS_acc: "));  Serial.println(POS_acc);
+			Serial.print("POS: "); Serial.println(POS);
+			Serial.print("POS_rq: "); Serial.println(POS_rq);
+			Serial.print("POS_calc: "); Serial.println(POS_calc);
 		}
-		GPIOR0 |= (1 << 4); //versnellen	
-		RPM_pos = 50000;
+
+
 		//start motor
 		TCCR2B |= (1 << 3);
 		TIMSK2 |= (1 << 1); //enable interupt 
@@ -476,7 +510,7 @@ void stop() {
 	GPIOR0 &= ~(1 << 4);
 	GPIOR0 &= ~(1 << 5);
 	PORTB &= ~(1 << 0); //bezetled 
-	
+
 
 }
 void MOTOR() {
@@ -506,64 +540,48 @@ ISR(TIMER2_COMPA_vect) {
 		POS--;
 	}
 	if (~GPIOR0 & (1 << 0)) { //niet home 
-		if (POS == POS_rq) {
-			stop();
-			PORTD |= (1 << 4); //lock bridge on
-			//Serial.println("stop");
-		}
 		if (POS == 0) {
 			stop();
 			//Serial.println("nul");
 		}
-
-		if (PRG_fase == 0) { //alleen bij in bedrijf, instelling nog erbij		
-
-			if (GPIOR0 & (1 << 4))FAST(); //versnellen aangezet in start
-
-			if (GPIOR0 & (1 << 1)) { //omhoog vertraging berekenen
-				if (POS_rq - RPM_pos == POS) {
-					GPIOR0 &= ~(1 << 4);
-					RPM_pos = RPM_pos - (RPM_pos / (Vmin - OCR2A));
-					RPM_pos = RPM_pos - ((Vmin - OCR2A) * 5);
-					OCR2A++;
-				}
-			}
-			else { //omlaag, vertraging berekenen
-				if (POS_rq + RPM_pos == POS) {
-					GPIOR0 &= ~(1 << 4);
-					RPM_pos = RPM_pos - (RPM_pos / (Vmin - OCR2A));
-					RPM_pos = RPM_pos - ((Vmin - OCR2A) * 5);
-					OCR2A++;
-				}
-
-			}
+		else if (POS == POS_rq) {
+			stop();
+			PORTD |= (1 << 4); //lock bridge on
+			//Serial.println("stop");
 		}
+		else if (POS == POS_calc) {
+			//if (PRG_fase == 0) { //alleen bij in bedrijf, instelling nog erbij		
+			GPIOR1 |= (1 << 1); //call SLOW() via loop
 
-	}
-}
-void FAST() {
-	unsigned long dis;
-	if (GPIOR0 & (1 << 1)) {
-		dis = POS_rq - POS;
-	}
-	else {
-		dis = POS - POS_rq;
-	}
-	if (dis > RPM_pos) {
-		if (OCR2A > Vmax) {
-			//RPM_count ++;
-			//if (RPM_count >10) { //Vmin - OCR2A){ //RPM_time) { // 1/4 rotatie
-				//RPM_count = 0;
-			if (GPIOR1 & (1 << 0)) {
-				OCR2A--;
-				GPIOR1 &= ~(1 << 0);
-			}
+
+			//}
 		}
 	}
-	else {
-		OCR2A = Vhome;
+}
+
+void FAST() { //versnellen tijd gebaseerd
+	if (millis() - accTijd > accStep) {
+		//Serial.print("*");
+		accTijd = millis();
+		OCR2A--; //verhoog snelheid
+		if (OCR2A == Vmax)GPIOR0 &= ~(1 << 4); //stop versnellen
 	}
 }
+void SLOW() { //vertragen positie en tijd gebaseerd, called from loop 
+	Serial.print("<");
+	GPIOR1 &= ~(1 << 1); //reset bit thats calls SLOW()
+//aantal stappen berekenen met deze snelheid. 
+	if(OCR2A < Vmin) OCR2A++;
+	POS_acc = (accStep * 1000) / (puls*OCR2A);
+	//richting
+	if (GPIOR0 & (1 << 1)) { //going up
+		POS_calc = POS + POS_acc;
+	}
+	else { ///going down
+		POS_calc = POS - POS_acc;
+	}
+}
+
 void FACTORY() {
 	//clears eeprom
 	Serial.println("factory");
@@ -599,6 +617,16 @@ void MEM_read() {
 
 	etage_status = EEPROM.read(100);
 	if (etage_status == 0xFF)etage_status = 0;
+
+
+	//prescaler
+	TCCR2B |= (1 << 0); //afstelling V1.03
+	TCCR2B |= (1 << 1);
+
+	//tijd berekenen
+	accStep = accSec * 1000 / (Vmin - Vmax);
+	puls = prescale * 0.0625;
+
 }
 void DSP_exe(byte txt) {
 	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
@@ -607,7 +635,7 @@ void DSP_exe(byte txt) {
 	et = etage_rq + 1;
 	switch (txt) {
 	case 10:
-		regelst; display.print("going home.....");
+		regelst; display.print(F("going home....."));
 		break;
 	case 12:
 		if (etage_status & (1 << etage_rq)) { //etage niet bepaald
@@ -622,11 +650,11 @@ void DSP_exe(byte txt) {
 		}
 		break;
 	case 15://keuze in te stellen etage
-		regel1s; display.print("etage instellen ");
+		regel1s; display.print(F("etage instellen "));
 		regel2; display.print(et);
 		break;
 	case 16: //instellen etage
-		regel1s; display.print("Instellen etage "); display.print(et);
+		regel1s; display.print(F("Instellen etage ")); display.print(et);
 		//Serial.println(POS);
 		regel2; display.print(POS);
 		break;
@@ -637,29 +665,29 @@ void DSP_exe(byte txt) {
 		regelb; display.print("-");
 		break;
 	case 30://handmatig instellen
-		regel1s; display.print("Handmatig, positie");
+		regel1s; display.print(F("Handmatig, positie"));
 		regel2; display.print(POS);
 		break;
 	case 40:
-		regel1s; display.print("Snelheid"); regel2;
+		regel1s; display.print(F("Snelheid")); regel2;
 		switch (PRG_level) {
 		case 0:
-			display.print("Vhome: "); display.print(255-Vhome);
+			display.print(F("Vhome: ")); display.print(255 - Vhome);
 			break;
 		case 1:
-			display.print("Vmin: "); display.print(255-Vmin);
+			display.print(F("Vmin: ")); display.print(255 - Vmin);
 			break;
 		case 2:
-			display.print("Vmax: "); display.print(255-Vmax);
+			display.print(F("Vmax: ")); display.print(255 - Vmax);
 			break;
 		}
 
 		break;
 	case 50:
-		regel1s; display.print("Diverse ");
+		regel1s; display.print(F("Diverse "));
 		switch (PRG_level) {
 		case 0:
-			display.print(""); display.print("Geen functie");
+			display.print(""); display.print(F("Geen functie"));
 			break;
 		}
 		break;
@@ -671,6 +699,7 @@ void DSP_exe(byte txt) {
 	}
 
 	display.fillRect(80, 50, 128, 64, BLACK);
+
 	display.display();
 	EIMSK |= (1 << INT0);
 }
@@ -792,6 +821,7 @@ void SW_off(byte sw) {
 		break;
 	}
 }
+
 void SW_on(byte sw) {
 	//Serial.println(sw);
 	switch (sw) {
@@ -1142,24 +1172,21 @@ void ENC_select(boolean dir) {
 		if (etage_rq > 7)etage_rq = 7;
 	}
 }
+
 void loop() {
 	//tbv dekoder
 	DEK_DCCh();
 	slowcount++;
-	if (slowcount == 0XFF) {
+	if (slowcount == 0XFF) { 
+
+		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
+		if (GPIOR1 & (1 << 1))SLOW(); //vertragen
+
 		count++;
 		if (count == 0) {
 			if (GPIOR0 & (1 << 6))RUN_rq();
 			if (COM_reg & (1 << 0))ET_rq();
 		}
-
-		GPIOR1 ^= (1 << 1); //   //2 encoder werkt slechter schakelaars denderen minder
-		if (GPIOR1 & (1<<1))SW_read();
-
-		RPM_time++;
-		if (RPM_time > 10 + (Vmin - OCR2A)) {
-			GPIOR1 |= (1 << 0);
-			RPM_time = 0;
-		}
+		SW_read();
 	}
 }

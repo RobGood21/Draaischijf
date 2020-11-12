@@ -300,12 +300,11 @@ ISR(INT0_vect) { //ISR for DeKoder receive on Pin 2
 	//bit2=falsepart
 	//bit3= received bit true =true false =false
 	//bit4=restart, begin, failed as true
-
 	cli();
 	DEK_duur = (micros() - DEK_Tperiode);
 	DEK_Tperiode = micros();
-	if (DEK_duur > 50) {
-		if (DEK_duur < 62) {
+	if (DEK_duur > 50) { //50
+		if (DEK_duur < 62) { //62
 			DEK_Reg |= (1 << 0); //bitSet(DekReg, 0);
 
 			if (bitRead(DEK_Reg, 1) == false) {
@@ -321,9 +320,9 @@ ISR(INT0_vect) { //ISR for DeKoder receive on Pin 2
 			}
 		}
 		else {
-			if (DEK_duur > 106) {
+			if (DEK_duur > 106) { //106
 
-				if (DEK_duur < 124) { //preferred 118 6us extra space in false bit
+				if (DEK_duur < 124) { //preferred 124 6us extra space in false bit
 					DEK_Reg |= (1 << 0); //bitSet(DekReg, 0);
 					if (bitRead(DEK_Reg, 2) == false) {
 						DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);

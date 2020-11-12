@@ -19,7 +19,7 @@ bit7 divider voor encoder
 
 GPIOR1
 bit0 timer versnellen vertragen
-bit1 divider sw read speed
+bit1 in Loop call and reet in SLOW(), set in ISR timer 2
 
 MEM_reg 
 bit0  free
@@ -34,3 +34,4 @@ EEPROM
 110 Vhome
 111 Vmin
 112 Vmax
+113 Vstep waardes 0~3 (shows 1-4)
