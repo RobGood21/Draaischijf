@@ -35,3 +35,4 @@ EEPROM
 111 Vmin
 112 Vmax
 113 Vstep waardes 0~3 (shows 1-4)
+114 aantalStops

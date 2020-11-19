@@ -20,6 +20,10 @@
  Versie hardware op baseren project TurN V1.01
  Toegevoegd uitgang nog te definieren, tijdelijk op lock, als brug nieuwe positie vraag krijgt
  gaat uitgang laag als brug in rust is gaat uitgang aan.
+ Vstep toegevoegd voor in runtime instellen van prescaler 9snelheid stappen)
+ Etages hernoemd naar STOPS en aantal instelbaar gemaakt van 1~16
+
+ Mem_read en factory reset aangepast voor versie bedoeld voor treinlift, aangedreven door draadeind.
 
 */
 
@@ -65,9 +69,10 @@ unsigned long POS;
 unsigned long POS_rq;
 unsigned long POS_acc; //aantal stappen tussen afrem posities
 unsigned long POS_calc; //afrem positie
-volatile unsigned long etage[16];
-byte etage_status; //bit0 false positie bepaald, enz lezen eeprom 100
-byte etage_rq;
+volatile unsigned long stops[16];
+byte aantalStops;
+byte stops_status; //bit0 false positie bepaald, enz lezen eeprom 100
+byte stops_rq;
 byte switchstatus[3];
 byte switchcount;
 byte PRG_fase;
@@ -440,7 +445,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	switch (n) {
 	case 0:
 		if (port == true) {
-			etage_rq = channel - 1;
+			stops_rq = channel - 1;
 			ET_rq();
 			DSP_exe(12);
 			//Serial.println(channel-1);
@@ -448,7 +453,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 		break;
 	case 1:
 		if (port == true) {
-			etage_rq = channel + 3;
+			stops_rq = channel + 3;
 			ET_rq();
 			DSP_exe(12);
 			//Serial.println(channel + 3);
@@ -474,7 +479,7 @@ void start() {
 			}
 			//richting en POS_calc instellen
 			if (GPIOR0 & (1 << 1)) { //up
-				if ((POS_rq - POS)/2 <= POS_acc) {
+				if ((POS_rq - POS) / 2 <= POS_acc) {
 					//Serial.println("kleiner");
 					POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
 				}
@@ -483,7 +488,7 @@ void start() {
 				}
 			}
 			else { //down
-				if ((POS - POS_rq)/2 <= POS_acc) {
+				if ((POS - POS_rq) / 2 <= POS_acc) {
 					//Serial.println("groter");
 					POS_calc = POS_rq + ((POS - POS_rq) / 2);
 				}
@@ -525,6 +530,7 @@ void MOTOR() {
 		PORTB &= ~(1 << 1);
 		RUN_home();
 	}
+	PRG_fase = 0;
 }
 void RUN_home() { //move to HOME	
 	down;
@@ -553,9 +559,6 @@ ISR(TIMER2_COMPA_vect) {
 		else if (POS == POS_calc) {
 			//if (PRG_fase == 0) { //alleen bij in bedrijf, instelling nog erbij		
 			GPIOR1 |= (1 << 1); //call SLOW() via loop
-
-
-			//}
 		}
 	}
 }
@@ -590,31 +593,36 @@ void FACTORY() {
 	}
 }
 void MEM_read() {
+	//snelheden worden als 255-Vsnelheid getoond
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 20;
 	Vmin = EEPROM.read(111);
 	if (Vmin == 0xFF)Vmin = 100;
 	Vmax = EEPROM.read(112);
-	if (Vmax == 0xFF)Vmax = 5;
+	if (Vmax == 0xFF)Vmax = 5; //Treinlift 4
 	Vstep = EEPROM.read(113);
-	if (Vstep > 3) Vstep = 3;
+	if (Vstep > 3) Vstep = 1; //TurN 3, Treinlift 1
+
+	aantalStops = EEPROM.read(114);
+	if (aantalStops > 16)aantalStops = 8;
+
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
 
-	for (byte i = 0; i < 8; i++) {
-		EEPROM.get(0 + (5 * i), etage[i]);
-		if (etage[i] == 0xFFFFFFFF) {
+	for (byte i = 0; i < 16; i++) {
+		EEPROM.get(0 + (5 * i), stops[i]);
+		//instelling treinlift
+		if (stops[i] == 0xFFFFFFFF) {
 			if (i == 0) {
-				etage[i] = 20000;
+				stops[0] = 10000;
 			}
 			else {
-				etage[i] = 20000 + (i * 420000);
+				stops[i] = 400000 * i + 10000;
 			}
 		}
 	}
-
-	etage_status = EEPROM.read(100);
-	if (etage_status == 0xFF)etage_status = 0;
+	stops_status = EEPROM.read(100);
+	if (stops_status == 0xFF)stops_status = 0;
 	COM_V();
 }
 void COM_V() { //diverse berekeningen voor snelheid
@@ -640,29 +648,23 @@ void DSP_exe(byte txt) {
 	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
 	cd;
 	byte et;
-	et = etage_rq + 1;
+	et = stops_rq + 1;
 	switch (txt) {
 	case 10:
 		regelst; display.print(F("going home....."));
 		break;
 	case 12:
-		if (etage_status & (1 << etage_rq)) { //etage niet bepaald
-			regel1s; display.print("Etage "); display.print(et); display.print(" niet bepaald");
-			regelb; display.print("*");
-		}
-		else { //etage bepaald
-			regelb; display.print(et);
-			if (~GPIOR0 & (1 << 3)) { //motor uit
-				regelst; display.print("Stop");
-			}
+		regelb; display.print(et);
+		if (~GPIOR0 & (1 << 3)) { //motor uit
+			regelst; display.print("Stop");
 		}
 		break;
-	case 15://keuze in te stellen etage
-		regel1s; display.print(F("etage instellen "));
+	case 15://keuze in te stellen stops
+		regel1s; display.print(F("stops instellen "));
 		regel2; display.print(et);
 		break;
-	case 16: //instellen etage
-		regel1s; display.print(F("Instellen etage ")); display.print(et);
+	case 16: //instellen stops
+		regel1s; display.print(F("Instellen stops ")); display.print(et);
 		//Serial.println(POS);
 		regel2; display.print(POS);
 		break;
@@ -677,7 +679,7 @@ void DSP_exe(byte txt) {
 		regel2; display.print(POS);
 		break;
 	case 40:
-		regel1s; display.print(F("Snelheid")); regel2;
+		regel1s; display.print(F("Instellingen")); regel2;
 		switch (PRG_level) {
 		case 0:
 			display.print(F("Vhome: ")); display.print(255 - Vhome);
@@ -691,11 +693,14 @@ void DSP_exe(byte txt) {
 		case 3:
 			display.print(F("Vstep: ")); display.print(Vstep + 1);
 			break;
+		case 4:
+			display.print(F("Stops: ")); display.print(aantalStops);
+			break;
 		}
 
 		break;
 	case 50:
-		regel1s; display.print(F("Diverse "));
+		regel1s; display.print(F("Modes "));
 		switch (PRG_level) {
 		case 0:
 			display.print(""); display.print(F("Geen functie"));
@@ -724,19 +729,19 @@ void DSP_prg() {
 		break;
 	case 2: //bepaal etages
 		switch (PRG_level) {
-		case 0: //kiezen etage
+		case 0: //kiezen stops
 			DSP_exe(15);
 			break;
-		case 1: //instellen gekozen etage
+		case 1: //instellen gekozen stops
 			DSP_exe(16);
 			break;
 		case 2: //max levels
 			PRG_level = 0;
 			DSP_exe(15);
-			etage[etage_rq] = POS;
-			etage_status &= ~(1 << etage_rq);
-			EEPROM.put(0 + (5 * etage_rq), POS);
-			EEPROM.update(100, etage_status);
+			stops[stops_rq] = POS;
+			stops_status &= ~(1 << stops_rq);
+			EEPROM.put(0 + (5 * stops_rq), POS);
+			EEPROM.update(100, stops_status);
 			break;
 		}
 		break;
@@ -852,19 +857,12 @@ void SW_on(byte sw) {
 			stop();
 			POS = 0;
 			GPIOR0 &= ~(1 << 0);
-			//check request spot (default 0)
-			etage_rq = 0;
-			if (etage_status & (1 << etage_rq)) { //eerst alleen voor default
-				DSP_exe(12);
+			stops_rq = 0; //move to stop 0
+			POS_rq = stops[0];
+			if (POS_rq > 0) {
+				up; start();
 			}
-			else { // spot bekend ga naar positie
-				POS_rq = etage[0];
-				//Serial.println(POS_rq);
-				if (POS_rq > 0) {
-					up; start();
-				}
-				DSP_exe(12);//DSP_prg();
-			}
+			DSP_exe(12);//DSP_prg();
 		}
 		break;
 	case 5:
@@ -941,10 +939,10 @@ void SW_0(boolean onoff) { //up
 				break;
 			}
 			break;
-		case 3: //snelheid instellen
+		case 3: //Instellingen met byte waardes
 			PRG_level++;
 
-			if (PRG_level > 3)PRG_level = 0;
+			if (PRG_level > 4)PRG_level = 0;
 			DSP_exe(40);
 			break;
 
@@ -991,7 +989,7 @@ void SW_1(boolean onoff) { //down
 				start();
 			}
 			break;
-		case 2: //instellen etage
+		case 2: //instellen stops
 			switch (PRG_level) {
 			case 0:
 				SW_encoder(false);
@@ -1046,6 +1044,7 @@ void SW_2() {
 		EEPROM.update(111, Vmin);
 		EEPROM.update(112, Vmax);
 		EEPROM.update(113, Vstep);
+		EEPROM.update(114, aantalStops);
 		COM_V();
 		OCR2A = Vhome;
 		PRG_fase = 0;
@@ -1069,7 +1068,6 @@ void SW_3() {
 	PRG_level = 0;
 }
 void ET_rq() {
-	//Serial.println("*");
 	PORTD &= ~(1 << 4); //free lock at new position request
 	if (~COM_reg & (1 << 0)) {
 		COM_reg |= ((1 << 0));
@@ -1090,7 +1088,7 @@ void RUN_rq() {
 	}
 	else {
 		GPIOR0 &= ~(1 << 6);
-		POS_rq = etage[etage_rq];
+		POS_rq = stops[stops_rq];
 		if (POS < POS_rq) {
 			up;
 		}
@@ -1111,7 +1109,7 @@ void SW_encoder(boolean dir) {
 		ENC_fine(dir);
 		DSP_exe(30);
 		break;
-	case 2: //etage instellen
+	case 2: //stops instellen
 		switch (PRG_level) {
 		case 0:
 			ENC_select(dir);
@@ -1123,7 +1121,7 @@ void SW_encoder(boolean dir) {
 			break;
 		}
 		break;
-	case 3: //snelheid instellen
+	case 3: //waardes instellingen
 		if (dir) {
 			switch (PRG_level) {
 			case 0:
@@ -1138,6 +1136,10 @@ void SW_encoder(boolean dir) {
 			case 3:
 				Vstep--;
 				if (Vstep > 3) Vstep = 3;
+				break;
+			case 4: //aantal stops
+				aantalStops--;
+				if (aantalStops < 1) aantalStops = 16;
 				break;
 			}
 		}
@@ -1155,6 +1157,10 @@ void SW_encoder(boolean dir) {
 			case 3:
 				Vstep++;
 				if (Vstep > 3)Vstep = 0;
+				break;
+			case 4: //
+				aantalStops++;
+				if (aantalStops > 16)aantalStops = 1;
 				break;
 			}
 		}
@@ -1186,12 +1192,12 @@ void ENC_fine(boolean dir) {
 }
 void ENC_select(boolean dir) {
 	if (!dir) {
-		etage_rq++;
-		if (etage_rq > 7)etage_rq = 0;
+		stops_rq++;
+		if (stops_rq > aantalStops - 1)stops_rq = 0;
 	}
 	else {
-		etage_rq--;
-		if (etage_rq > 7)etage_rq = 7;
+		stops_rq--;
+		if (stops_rq > aantalStops - 1)stops_rq = aantalStops - 1;
 	}
 }
 void loop() {
