@@ -63,6 +63,7 @@ byte DEK_Buf4[6];
 byte DEK_Buf5[6];
 //**End declaration for deKoder
 byte DCC_adres;
+byte DCC_mode; //EEPROM 
 byte COM_reg;
 byte slowcount;
 unsigned long POS;
@@ -84,7 +85,7 @@ byte Vmax;
 byte Vstep; //instelling prescaler 64;128;259;1024
 byte count;
 unsigned long runwait;
-byte accSec = 3; //ingestelde acceleratietijd in seconden
+byte Vaccel = 3; //ingestelde acceleratietijd in seconden
 float accStep; //berekende tijd per snelheids step in microsec
 float puls;
 unsigned long accTijd; //verstreken tijd
@@ -440,24 +441,49 @@ void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff
 }
 //**End void's for DeKoder
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
-	byte n;
-	n = decoder - DCC_adres;
-	switch (n) {
-	case 0:
-		if (port == true) {
-			stops_rq = channel - 1;
-			ET_rq();
-			DSP_exe(12);
-			//Serial.println(channel-1);
+	//Als motor draait geen DCC ontvangst. Start() disables DCC Stop() enables DCC (EIMKS masks register)
+	//Filter, alleen er toe doende commandoos doorlaten, als motor draait geen DCC ontvangst
+	int ad;
+	ad = (decoder - DCC_adres) * 4 + channel; //adressen omgezet in 0~16
+	switch (DCC_mode) {
+	case 0: //Single alleen true port schakeld stops
+		if (ad < aantalStops) {
+			if (port == true) {
+				stops_rq = ad - 1;
+				ET_rq();
+				DSP_exe(12);
+			}
 		}
 		break;
-	case 1:
+	case 1: //DUO-RA true schakeld stop false schakeld stop+1
 		if (port == true) {
-			stops_rq = channel + 3;
+			ad = ((ad * 2) - 1) - 1;
+		}
+		else { //port =false
+			ad = ((ad * 2)) - 1;
+		}
+		if (ad < aantalStops) {
+			stops_rq = ad;
 			ET_rq();
 			DSP_exe(12);
-			//Serial.println(channel + 3);
 		}
+		break;
+	case 2: //DUO AR true schakeled stops+1, false schakeld stops
+		if (port == false) {
+			ad = ((ad * 2) - 1) - 1;
+		}
+		else { //port =true
+			ad = ((ad * 2)) - 1;
+		}
+		if (ad < aantalStops) {
+			stops_rq = ad;
+			ET_rq();
+			DSP_exe(12);
+		}
+		break;
+
+	case 3://Draai15 mode
+
 		break;
 	}
 }
@@ -507,7 +533,8 @@ void start() {
 		TCCR2B |= (1 << 3);
 		TIMSK2 |= (1 << 1); //enable interupt 
 		GPIOR0 |= (1 << 5);
-		PORTB |= (1 << 0);//bezet led
+		PORTB |= (1 << 0);//Run led
+		EIMSK &= ~(1 << INT0); //disable DCC receive
 	}
 }
 void stop() {
@@ -515,7 +542,8 @@ void stop() {
 	TIMSK2 &= ~(1 << 1);
 	GPIOR0 &= ~(1 << 4);
 	GPIOR0 &= ~(1 << 5);
-	PORTB &= ~(1 << 0); //bezetled 
+	PORTB &= ~(1 << 0); //Run led 
+	EIMSK |= (1 << INT0); //enable DCC receive
 
 
 }
@@ -564,14 +592,12 @@ ISR(TIMER2_COMPA_vect) {
 }
 void FAST() { //versnellen tijd gebaseerd
 	if (millis() - accTijd > accStep) {
-		//Serial.print("*");
 		accTijd = millis();
 		OCR2A--; //verhoog snelheid
 		if (OCR2A == Vmax)GPIOR0 &= ~(1 << 4); //stop versnellen
 	}
 }
 void SLOW() { //vertragen positie en tijd gebaseerd, called from loop 
-	Serial.print("<");
 	GPIOR1 &= ~(1 << 1); //reset bit thats calls SLOW()
 	GPIOR0 &= ~(1 << 4); //reset versnelling
 //aantal stappen berekenen met deze snelheid. 
@@ -601,24 +627,35 @@ void MEM_read() {
 	Vmax = EEPROM.read(112);
 	if (Vmax == 0xFF)Vmax = 5; //Treinlift 4
 	Vstep = EEPROM.read(113);
-	if (Vstep > 3) Vstep = 1; //TurN 3, Treinlift 1
+	if (Vstep > 3) Vstep = 3; //TurN 3, Treinlift 1
 
 	aantalStops = EEPROM.read(114);
 	if (aantalStops > 16)aantalStops = 8;
 
+	Vaccel = EEPROM.read(115);
+	if (Vaccel > 10)Vaccel = 3;
+
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
+	DCC_mode = EEPROM.read(104);
+	if (DCC_mode > 10)DCC_mode = 0;
 
 	for (byte i = 0; i < 16; i++) {
 		EEPROM.get(0 + (5 * i), stops[i]);
 		//instelling treinlift
 		if (stops[i] == 0xFFFFFFFF) {
-			if (i == 0) {
-				stops[0] = 10000;
-			}
-			else {
-				stops[i] = 400000 * i + 10000;
-			}
+
+			stops[i] = 500 + i * 500; //draaischijf
+
+			//treinlift
+			//if (i == 0) {
+			//	stops[0] = 10000;
+			//}
+			//else {
+			//	stops[i] = 400000 * i + 10000;
+			//}
+
+
 		}
 	}
 	stops_status = EEPROM.read(100);
@@ -642,7 +679,7 @@ void COM_V() { //diverse berekeningen voor snelheid
 		break;
 	}
 	//tijd berekenen van 1 vertraag stap
-	accStep = accSec * 1000 / (Vmin - Vmax);
+	accStep = Vaccel * 1000 / (Vmin - Vmax);
 }
 void DSP_exe(byte txt) {
 	EIMSK &= ~(1 << INT0); //interrupt DCC ontvangst ff uit
@@ -679,22 +716,49 @@ void DSP_exe(byte txt) {
 		regel2; display.print(POS);
 		break;
 	case 40:
-		regel1s; display.print(F("Instellingen")); regel2;
+		regel1s; display.print(F("Instellingen"));
 		switch (PRG_level) {
 		case 0:
+			regel2;
 			display.print(F("Vhome: ")); display.print(255 - Vhome);
 			break;
 		case 1:
+			regel2;
 			display.print(F("Vmin: ")); display.print(255 - Vmin);
 			break;
 		case 2:
+			regel2;
 			display.print(F("Vmax: ")); display.print(255 - Vmax);
 			break;
 		case 3:
+			regel2;
 			display.print(F("Vstep: ")); display.print(Vstep + 1);
 			break;
 		case 4:
+			regel2;
+			display.print(F("Vaccel: ")); display.print(Vaccel);
+			break;
+
+		case 5:
+			regel2;
 			display.print(F("Stops: ")); display.print(aantalStops);
+			break;
+		case 6:
+			display.print(F(" DCC: ")); regel2;
+			switch (DCC_mode) {
+			case 0:
+				display.print(F("Single"));
+				break;
+			case 1:
+				display.print(F("Duo-RA"));
+				break;
+			case 2:
+				display.print(F("Duo-AR"));
+				break;
+			case 3:
+				display.print(F("Draai15"));
+				break;
+			}
 			break;
 		}
 
@@ -709,8 +773,7 @@ void DSP_exe(byte txt) {
 		break;
 	case 60:
 		regel1s; display.println("DCC adres");
-		regel2; display.print(DCC_adres * 4 - 3); regel2s; display.print("("); display.print(DCC_adres); display.print("-1~");
-		display.print(DCC_adres + 1); display.print("-4)");
+		regel2; display.print(DCC_adres * 4 - 3); display.print("("); display.print(DCC_adres); display.print("-1)");
 		break;
 	}
 
@@ -814,7 +877,7 @@ void SW_off(byte sw) {
 			break;
 		case 13:
 			ENC_count = 0;
-			SW_encoder(false);
+			SW_encoder(true);
 			break;
 		default:
 			ENC_count = 0;
@@ -825,7 +888,7 @@ void SW_off(byte sw) {
 		switch (ENC_count) {
 		case 3:
 			ENC_count = 0;
-			SW_encoder(true);
+			SW_encoder(false);
 			break;
 		case 12:
 			ENC_count = 13;
@@ -883,18 +946,6 @@ void SW_on(byte sw) {
 			ENC_count = 0;
 			break;
 		}
-
-		/*
-		if (switchstatus[2] & (1 << 1)) {
-			GPIOR0 ^= (1 << 7);
-			if (GPIOR0 & (1 << 7))SW_encoder(true);
-		}
-		else {
-			GPIOR0 ^= (1 << 6);
-			if (GPIOR0 & (1 << 6)) SW_encoder(false);
-		}
-
-*/
 		break;
 	case 9: ///Enc B
 		switch (ENC_count) {
@@ -942,7 +993,7 @@ void SW_0(boolean onoff) { //up
 		case 3: //Instellingen met byte waardes
 			PRG_level++;
 
-			if (PRG_level > 4)PRG_level = 0;
+			if (PRG_level > 6)PRG_level = 0;
 			DSP_exe(40);
 			break;
 
@@ -1045,6 +1096,8 @@ void SW_2() {
 		EEPROM.update(112, Vmax);
 		EEPROM.update(113, Vstep);
 		EEPROM.update(114, aantalStops);
+		EEPROM.update(115,Vaccel);
+		EEPROM.update(104, DCC_mode);
 		COM_V();
 		OCR2A = Vhome;
 		PRG_fase = 0;
@@ -1137,9 +1190,17 @@ void SW_encoder(boolean dir) {
 				Vstep--;
 				if (Vstep > 3) Vstep = 3;
 				break;
-			case 4: //aantal stops
+			case 4: //Vaccel
+				Vaccel--;
+				if (Vaccel > 10)Vaccel = 10;
+				break;
+			case 5: //aantal stops
 				aantalStops--;
 				if (aantalStops < 1) aantalStops = 16;
+				break;
+			case 6: //DCC modi
+				DCC_mode--;
+				if (DCC_mode > 3)DCC_mode = 3;
 				break;
 			}
 		}
@@ -1158,9 +1219,17 @@ void SW_encoder(boolean dir) {
 				Vstep++;
 				if (Vstep > 3)Vstep = 0;
 				break;
-			case 4: //
+			case 4: //Vaccel
+				Vaccel++;
+				if (Vaccel > 10)Vaccel = 0;
+				break;
+			case 5: //
 				aantalStops++;
 				if (aantalStops > 16)aantalStops = 1;
+				break;
+			case 6: //DCC modi
+				DCC_mode++;
+				if (DCC_mode > 3)DCC_mode = 0;
 				break;
 			}
 		}
