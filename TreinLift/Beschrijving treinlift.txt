@@ -3,6 +3,8 @@ Aansluitingen hoog actief maken, alle minnen aan elkaar en aan de GND
 Pin11 (PORTB3) = Puls +
 Pin10 (PORTB2)= Direction +  false = naar beneden
 Pin9(PORTB1) =Enabled + false = draaien
+pin8 Run true als motor draait
+pin4 Lock true als brug vrij is.
 
 DCC modes (tonen +1)
 0=single 1 poort true alleen gebruiken

@@ -627,7 +627,7 @@ void MEM_read() {
 	Vmax = EEPROM.read(112);
 	if (Vmax == 0xFF)Vmax = 5; //Treinlift 4
 	Vstep = EEPROM.read(113);
-	if (Vstep > 3) Vstep = 3; //TurN 3, Treinlift 1
+	if (Vstep > 3) Vstep = 1; //TurN 3, Treinlift 1
 
 	aantalStops = EEPROM.read(114);
 	if (aantalStops > 16)aantalStops = 8;
@@ -638,24 +638,22 @@ void MEM_read() {
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
 	DCC_mode = EEPROM.read(104);
-	if (DCC_mode > 10)DCC_mode = 0;
+	if (DCC_mode > 10)DCC_mode = 1;
 
 	for (byte i = 0; i < 16; i++) {
 		EEPROM.get(0 + (5 * i), stops[i]);
 		//instelling treinlift
 		if (stops[i] == 0xFFFFFFFF) {
 
-			stops[i] = 500 + i * 500; //draaischijf
+			//stops[i] = 500 + i * 500; //draaischijf
 
 			//treinlift
-			//if (i == 0) {
-			//	stops[0] = 10000;
-			//}
-			//else {
-			//	stops[i] = 400000 * i + 10000;
-			//}
-
-
+			if (i == 0) {
+				stops[0] = 10000;
+			}
+			else {
+				stops[i] = 400000 * i + 10000;
+			}
 		}
 	}
 	stops_status = EEPROM.read(100);
@@ -1096,7 +1094,7 @@ void SW_2() {
 		EEPROM.update(112, Vmax);
 		EEPROM.update(113, Vstep);
 		EEPROM.update(114, aantalStops);
-		EEPROM.update(115,Vaccel);
+		EEPROM.update(115, Vaccel);
 		EEPROM.update(104, DCC_mode);
 		COM_V();
 		OCR2A = Vhome;
@@ -1148,7 +1146,12 @@ void RUN_rq() {
 		else {
 			down;
 		}
-		if (POS != POS_rq)start();
+		if (POS != POS_rq) {
+			start();
+		}
+		else {
+			PORTD |= (1 << 4); //vrij geven
+		}
 	}
 }
 void SW_encoder(boolean dir) {
