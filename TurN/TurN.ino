@@ -627,20 +627,13 @@ void MEM_read() {
 	if (DCC_mode > 10)DCC_mode = 1;
 
 	for (byte i = 0; i < 16; i++) {
-		EEPROM.get(0 + (5 * i), stops[i]);
+		stops[i] = 500;
+
+		//EEPROM.get(0 + (5 * i), stops[i]);
 		//instelling treinlift
-		if (stops[i] == 0xFFFFFFFF) {
-
-			//stops[i] = 500 + i * 500; //draaischijf
-
-			//treinlift
-			if (i == 0) {
-				stops[0] = 10000;
-			}
-			else {
-				stops[i] = 400000 * i + 10000;
-			}
-		}
+		//if (stops[i] == 0xFFFFFFFF) {
+		//	stops[i] = 500 + i * 500; //draaischijf
+		//}
 	}
 	stops_status = EEPROM.read(100);
 	if (stops_status == 0xFF)stops_status = 0;
@@ -885,7 +878,7 @@ void SW_off(byte sw) {
 	}
 }
 void SW_on(byte sw) {
-	//Serial.println(sw);
+	//Serial.print("Switch on: "); Serial.println(sw);
 	switch (sw) {
 	case 0:
 		SW_0(true);
@@ -899,6 +892,7 @@ void SW_on(byte sw) {
 	case 3:
 		SW_3();
 		break;
+//MELDERS ******
 	case 4:
 		if (GPIOR0 & (1 << 0)) { //home gevonden
 			stop();

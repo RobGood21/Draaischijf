@@ -21,6 +21,11 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EEPROM-2.0", "Libraries\EEP
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TurN", "TurN\TurN.vcxproj", "{610D6C63-4B7C-45C3-ADD3-8C283439684F}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{BE719FF4-88F6-49A5-83F0-2A2FBC06996C}"
+	ProjectSection(SolutionItems) = preProject
+		Turn, beschrijving.txt = Turn, beschrijving.txt
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems*{6f6c8f01-0fa7-4ed9-affb-293fcedb64c4}*SharedItemsImports = 9
