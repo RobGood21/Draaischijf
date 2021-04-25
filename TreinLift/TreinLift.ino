@@ -3,7 +3,7 @@
  Created:	9/22/2020 10:13:11 AM
  Author:	rob Antonisse
 
- Design for train vertical fiddle yard. Treinlift
+ Design for train vertical fiddle yard. Treinlift or turntable, roll bridge
  Steppermotor 23HS5628-08 stepper driver TB6600
 
 
@@ -16,6 +16,7 @@
  Toegevoegd in menu instellingen voor Vhome, Vmin
  Snelheid wordt in display geinverteerd weergeven
  Library splah.h en wire.h uitgezet
+ 
  V2.02
  Versie hardware op baseren project TurN V1.01
  Toegevoegd uitgang nog te definieren, tijdelijk op lock, als brug nieuwe positie vraag krijgt
@@ -24,6 +25,10 @@
  Etages hernoemd naar STOPS en aantal instelbaar gemaakt van 1~16
 
  Mem_read en factory reset aangepast voor versie bedoeld voor treinlift, aangedreven door draadeind.
+
+ V2.03 Versie bedoeld voor draaischijf met alleen stappen voor de positionering
+ 
+
 
 */
 

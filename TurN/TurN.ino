@@ -11,6 +11,14 @@ Mogelijkheid voor aansturen door treinbesturingsprogrammaas als Koploper en Itra
 
 Uitgegaan van treinlift project op 31jan2021
 
+Versie V3-1 bedoeld voor draaischijf zonder adres positionering.
+
+25april2021 begonnen aan versie V3-2 algemene versie
+Algemeen:
+Homen. Voor draaischijf altijd tegen de klok in. Rolbrug naar voren. Lift naar beneden. Algemene draairichting met hardware aanpassen hieraan. 
+Aampassingen:
+Instelling keuze toepassing 0=draaischijf, 1=rolbrug, 2=lift
+
 */
 
 
@@ -56,8 +64,9 @@ unsigned long POS;
 unsigned long POS_rq;
 unsigned long POS_acc; //aantal stappen tussen afrem posities
 unsigned long POS_calc; //afrem positie
-volatile unsigned long stops[16];
+long stops[16];
 byte aantalStops;
+byte toepassing;
 byte stops_status; //bit0 false positie bepaald, enz lezen eeprom 100
 byte stops_rq;
 byte switchstatus[3];
@@ -600,20 +609,21 @@ void SLOW() { //vertragen positie en tijd gebaseerd, called from loop
 void FACTORY() {
 	//clears eeprom
 	Serial.println("factory");
-	for (byte i = 0; i < 255; i++) {
+	for (byte i = 0; i < 500; i++) {
 		EEPROM.update(i, 0xFF);
 	}
 }
 void MEM_read() {
+	//instellingen voor een draaischijf zonder vertraging
 	//snelheden worden als 255-Vsnelheid getoond
 	Vhome = EEPROM.read(110);
-	if (Vhome == 0xFF)Vhome = 20;
+	if (Vhome == 0xFF)Vhome = 50;
 	Vmin = EEPROM.read(111);
-	if (Vmin == 0xFF)Vmin = 100;
+	if (Vmin == 0xFF)Vmin = 150;
 	Vmax = EEPROM.read(112);
-	if (Vmax == 0xFF)Vmax = 5; //Treinlift 4
+	if (Vmax == 0xFF)Vmax = 30; //Treinlift 4
 	Vstep = EEPROM.read(113);
-	if (Vstep > 3) Vstep = 1; //TurN 3, Treinlift 1
+	if (Vstep > 3) Vstep = 3; //TurN 3, Treinlift 1
 
 	aantalStops = EEPROM.read(114);
 	if (aantalStops > 16)aantalStops = 8;
@@ -621,19 +631,25 @@ void MEM_read() {
 	Vaccel = EEPROM.read(115);
 	if (Vaccel > 10)Vaccel = 3;
 
+	toepassing = EEPROM.read(116); //0==draaischijf, 1=rolbrug 2=lift
+	if (toepassing > 2)toepassing = 0; 
+
 	DCC_adres = EEPROM.read(103);
 	if (DCC_adres == 0xFF)DCC_adres = 1;
 	DCC_mode = EEPROM.read(104);
 	if (DCC_mode > 10)DCC_mode = 1;
 
 	for (byte i = 0; i < 16; i++) {
-		stops[i] = 500;
+		
+		EEPROM.get(0 + (5 * i), stops[i]);		
+		//instelling draaischijf
+		if (stops[i] == 0xFFFFFFFF) {
+			stops[i] = (900 * i) + 500; //draaischijf
 
-		//EEPROM.get(0 + (5 * i), stops[i]);
-		//instelling treinlift
-		//if (stops[i] == 0xFFFFFFFF) {
-		//	stops[i] = 500 + i * 500; //draaischijf
-		//}
+			//Serial.print("Stop "); Serial.print(i); Serial.print(" :"); Serial.println(stops[i]);
+
+
+		}
 	}
 	stops_status = EEPROM.read(100);
 	if (stops_status == 0xFF)stops_status = 0;
@@ -720,7 +736,22 @@ void DSP_exe(byte txt) {
 			regel2;
 			display.print(F("Stops: ")); display.print(aantalStops);
 			break;
-		case 6:
+		case 6: //toepassing instellen
+			regel2;
+			switch (toepassing) {
+			case 0:
+				display.print(F("Schijf"));
+				break;
+			case 1:
+				display.print(F("Rolbrug"));
+				break;
+			case 2:
+				display.print(F("Lift"));
+				break;
+			}
+			break;
+
+		case 7:
 			display.print(F(" DCC: ")); regel2;
 			switch (DCC_mode) {
 			case 0:
@@ -878,7 +909,7 @@ void SW_off(byte sw) {
 	}
 }
 void SW_on(byte sw) {
-	//Serial.print("Switch on: "); Serial.println(sw);
+	Serial.print("Switch on: "); Serial.println(sw);
 	switch (sw) {
 	case 0:
 		SW_0(true);
@@ -971,7 +1002,7 @@ void SW_0(boolean onoff) { //up
 		case 3: //Instellingen met byte waardes
 			PRG_level++;
 
-			if (PRG_level > 6)PRG_level = 0;
+			if (PRG_level > 7)PRG_level = 0;
 			DSP_exe(40);
 			break;
 
@@ -1032,7 +1063,7 @@ void SW_1(boolean onoff) { //down
 				break;
 			}
 			break;
-		case 3: //instellen snelheid
+		case 3: //instellingen
 			SW_encoder(false);
 			break;
 		case 4: //diverse
@@ -1076,6 +1107,7 @@ void SW_2() {
 		EEPROM.update(114, aantalStops);
 		EEPROM.update(115, Vaccel);
 		EEPROM.update(104, DCC_mode);
+		EEPROM.update(116, toepassing); 
 		COM_V();
 		OCR2A = Vhome;
 		PRG_fase = 0;
@@ -1181,7 +1213,11 @@ void SW_encoder(boolean dir) {
 				aantalStops--;
 				if (aantalStops < 1) aantalStops = 16;
 				break;
-			case 6: //DCC modi
+			case 6: //toepassingen
+				toepassing--;
+				if (toepassing > 2)toepassing = 2;
+				break;
+			case 7: //DCC modi
 				DCC_mode--;
 				if (DCC_mode > 3)DCC_mode = 3;
 				break;
@@ -1210,7 +1246,11 @@ void SW_encoder(boolean dir) {
 				aantalStops++;
 				if (aantalStops > 16)aantalStops = 1;
 				break;
-			case 6: //DCC modi
+			case 6://Toepassing
+				toepassing++;
+				if (toepassing > 2)toepassing = 0;
+				break;
+			case 7: //DCC modi
 				DCC_mode++;
 				if (DCC_mode > 3)DCC_mode = 0;
 				break;

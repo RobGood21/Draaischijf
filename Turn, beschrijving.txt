@@ -46,3 +46,5 @@ EEPROM
 113 Vstep waardes 0~3 (shows 1-4)
 114 aantalStops
 115 Vaccel
+
+120 Toepassing 0=draaischijf (default) 1=rolbrug 2=lift
