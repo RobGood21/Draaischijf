@@ -19,7 +19,7 @@ GPIOR0
 bit0 init ok false nulpunt bepaald, true nulpunt, home zoeken 
 bit1 direction
 bit2 request start 
-bit3 flag motor aan of uit, schakeld motor vrij, true is aan
+bit3 flag motor aan of uit, schakeld motor vrij disabled, true is aan enabled
 bit4 versnellen true, vertragen false
 bit5 motor draaid true, false niet
 bit6 systeem, afremmen bij verandering terwijl draaid, actief =true
@@ -27,18 +27,23 @@ bit7 divider voor encoder
 
 GPIOR1
 bit0 timer versnellen vertragen
-bit1 in Loop call and reet in SLOW(), set in ISR timer 2
+bit1 in Loop call and reset in SLOW(), set in ISR timer 2
+bit2 Initial position bepalen, in setup true is doen, false is gedaan
 
 MEM_reg 
-bit0  free
+bit0  Positie met  false=Home  true=melders (default)
 
 EEPROM
-0~5 etage[0]
 100 spotstatus
 101
 102 MEM_reg
 103 DCC decoder adres, default=0xFF;
 104 DCC_mode
+1~20 struct stops[].set 
+200> struct stops[].downpos
+300>struct stops[].uppos
+400>struct stops[].finepos
+
 
 110 Vhome
 111 Vmin
@@ -47,4 +52,4 @@ EEPROM
 114 aantalStops
 115 Vaccel
 
-120 Toepassing 0=draaischijf (default) 1=rolbrug 2=lift
+120 Toepassing 0=draaischijf 1=rolbrug 2=lift
