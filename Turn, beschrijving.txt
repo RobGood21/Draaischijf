@@ -36,7 +36,7 @@ bit0  Positie met  false=Home  true=melders (default)
 EEPROM
 100 spotstatus
 101
-102 MEM_reg
+102 MEM_reg, let op default = 0xFF
 103 DCC decoder adres, default=0xFF;
 104 DCC_mode
 1~20 struct stops[].set 
