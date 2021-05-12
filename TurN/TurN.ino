@@ -71,16 +71,16 @@ unsigned long POS_calc; //afrem positie
 
 struct stop
 {
-	unsigned long downpos; //positie melder edge terugdraaiend, en positie in Home werking
-	unsigned long uppos; //positie melder edge ip draaiend
+	long downpos; //positie melder edge terugdraaiend, en positie in Home werking
+	long uppos; //positie melder edge ip draaiend
 	int finepos; //afwijken tov pos~up, fijnafstelling
 	byte reg; //finepos bekend, register met 8 booleans
 };
 
 struct stop stops[16]; //melder met adres 1 is stops[0]
 
-byte setcount;
-byte setstop; //welke stop is in het proces van bepalen, setten
+//byte setcount;
+//byte setstop; //welke stop is in het proces van bepalen, setten
 byte aantalStops;
 byte toepassing;
 byte stops_status; //bit0 false positie bepaald, enz lezen eeprom 100
@@ -104,6 +104,9 @@ float accStep; //berekende tijd per snelheids step in microsec
 float puls;
 unsigned long accTijd; //verstreken tijd
 
+
+byte zoeken = false;
+
 void setup() {
 	Serial.begin(9600);
 	//clear hardware registers 
@@ -120,6 +123,7 @@ void setup() {
 	EICRA &= ~(1 << 1);	//bitClear(EICRA, 1);
 	EIMSK |= (1 << INT0);//External Interrupt Mask Register bit0 INT0 > 1
 	//**End Setup for DeKoder
+
 	cd; //clear display
 	DSP_settxt(10, 30, 1); display.print(F("www.wisselmotor.nl"));
 	//regel2; display.print("Treinlift");
@@ -147,14 +151,17 @@ void setup() {
 	TCCR2B |= (1 << 2); //prescaler always 4  on(default true???)
 	OCR2A = 255; //snelheid
 	//init
+
 	switchstatus[0] = 0xFF;
 	switchstatus[1] = 0xFF;
 	switchstatus[2] = 0xFF;
 	switchcount = 0;
 	MEM_read();
 	//GPIOR1 |= (1 << 2); 
-	SW_read(); //V3.0 bepaal of een van de stops actief is
-	GPIOR1 |= (1 << 2); //flag for initial position bepalen
+	//SW_read(); //V3.0 bepaal of een van de stops actief is, lees schakelaars
+	//GPIOR1 |= (1 << 2); //flag for initial positions aan de schakelaars bepalen
+
+
 	MOTOR();
 	//RUN_home(); V3.0 also called in Motor
 }
@@ -417,64 +424,69 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	}
 }
 void start() {
+	//Serial.print(F("Start POS= ")); Serial.println(POS);
+
 	PORTD &= ~(1 << 4); //free lock
 	if (GPIOR0 & (1 << 3)) { //motor aan
 		OCR2A = Vhome;
-		if (~GPIOR0 & (1 << 0)) { //Not while going Home
-			if (PRG_fase == 0) OCR2A = Vmin; //versnellen/vertragen instelling er nog ij zetten
-			GPIOR0 |= (1 << 4); //versnellen	
-			//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
-			//prescaler 64;128;256;1024 (100 101 110 111) bit 3 altijd true? nog in EEPROM MEM
-			//aantal steps berekenen
-			POS_acc = 0;
-			for (byte i = Vmax; i <= Vmin; i++) {
-				//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
-				//accStep duur van 1 snelheidstap in milisec from MEM_read()
-				POS_acc = POS_acc + (accStep * 1000) / (puls*i);
-			}
+			if (~GPIOR0 & (1 << 0)) { //Not while going Home
 
-			//richting en POS_calc instellen
-			if (GPIOR0 & (1 << 1)) { //up
-				if ((POS_rq - POS) / 2 <= POS_acc) {
-					//Serial.println("kleiner");
-					POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
+				if (PRG_fase == 0) OCR2A = Vmin; //versnellen/vertragen instelling er nog ij zetten
+				GPIOR0 |= (1 << 4); //versnellen	
+				//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
+				//prescaler 64;128;256;1024 (100 101 110 111) bit 3 altijd true? nog in EEPROM MEM
+				//aantal steps berekenen
+				POS_acc = 0;
+				for (byte i = Vmax; i <= Vmin; i++) {
+					//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
+					//accStep duur van 1 snelheidstap in milisec from MEM_read()
+					POS_acc = POS_acc + (accStep * 1000) / (puls*i);
 				}
-				else {
-					POS_calc = POS_rq - POS_acc;
+
+				//richting en POS_calc instellen
+				if (GPIOR0 & (1 << 1)) { //up
+					if ((POS_rq - POS) / 2 <= POS_acc) {
+						//Serial.println("kleiner");
+						POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
+					}
+					else {
+						POS_calc = POS_rq - POS_acc;
+					}
 				}
-			}
-			else { //down
-				if ((POS - POS_rq) / 2 <= POS_acc) {
-					//Serial.println("groter");
-					POS_calc = POS_rq + ((POS - POS_rq) / 2);
+				else { //down
+					if ((POS - POS_rq) / 2 <= POS_acc) {
+						//Serial.println("groter");
+						POS_calc = POS_rq + ((POS - POS_rq) / 2);
+					}
+					else {
+						POS_calc = POS_rq + POS_acc;
+					}
 				}
-				else {
-					POS_calc = POS_rq + POS_acc;
-				}
-			}
-			//Serial.print(F("POS_acc: "));  Serial.println(POS_acc);
-			//Serial.print("POS: "); Serial.println(POS);
-			//Serial.print("POS_rq: "); Serial.println(POS_rq);
-			//Serial.print("POS_calc: "); Serial.println(POS_calc);
-		}
+			} //going home, searching stop
 		//start motor
+			startmotor();
+
+	}
+}
+void startmotor() {
 		TCCR2B |= (1 << 3);
 		TIMSK2 |= (1 << 1); //enable interupt 
 		GPIOR0 |= (1 << 5);
 		PORTB |= (1 << 0);//Run led
 		EIMSK &= ~(1 << INT0); //disable DCC receive
-	}
 }
 void stop() {
+	Serial.print(F("stop. POS= ")); Serial.println(POS);
 	TCCR2B &= ~(1 << 3);
 	TIMSK2 &= ~(1 << 1);
 	GPIOR0 &= ~(1 << 4);
 	GPIOR0 &= ~(1 << 5);
 	PORTB &= ~(1 << 0); //Run led 
 	EIMSK |= (1 << INT0); //enable DCC receive
+
 }
 void MOTOR() {
-	Serial.println(F("Motor"));
+	//Serial.println(F("Motor"));
 	GPIOR0 ^= (1 << 3);
 	if (~GPIOR0 & (1 << 3)) {
 		PORTB |= (1 << 1);
@@ -489,23 +501,22 @@ void MOTOR() {
 }
 
 void RUN_home() { //move to HOME	//Serial.println(melderadres);
-
+	//Serial.println(F("Runhome"));
 	if (MEM_reg & (1 << 0)) { //Melder-mode
-	//Als brug in bekende stop staat niks doen
-
-		if (melderadres > 0 && stops[melderadres].reg & (1 << 0)) { //staat op een bekende stop/positie
-			POS = (stops[melderadres].uppos + stops[melderadres].downpos) / 2; //POS op bekende positie zetten
+		byte ma = melderadres - 1;
+		//Als brug in bekende stop staat niks doen
+		if (melderadres > 0 && stops[ma].reg & (1 << 0)) { //staat op een bekende stop/positie
+			//POS = ((stops[ma].uppos - stops[ma].downpos) / 2 + stops[ma].downpos); //POS op bekende positie zetten
 			stop();
 			DSP_exe(12);
 		}
 		else { //positie niet bekend, of start tussen stops
 			down; //terug draaien
-			GPIOR0 |= (1 << 0); //stop zoeken searching
+			GPIOR0 |= (1 << 0); //zoeken searching (homing)
 			start(); //begin draaien
 			DSP_exe(11);
 		}
 	}
-
 	else { //home-mode		
 		down;
 		GPIOR0 |= (1 << 0); //home zoeken
@@ -521,6 +532,7 @@ ISR(TIMER2_COMPA_vect) {
 	else { //false is omlaag
 		POS--;
 	}
+
 	if (~GPIOR0 & (1 << 0)) { //niet home 
 		if (POS == 0) {
 			stop();
@@ -615,6 +627,8 @@ void MEM_read() {
 		//Serial.print(".reg "); Serial.print(i); Serial.print(" :"); Serial.println(stops[i].reg);
 		//Serial.println("-");
 	}
+	//eerste melder downpos altijd 0= home position
+	//stops[0].downpos = 0;
 
 	stops_status = EEPROM.read(100);
 	if (stops_status == 0xFF)stops_status = 0;
@@ -805,7 +819,7 @@ void DSP_prg() {
 			DSP_exe(15);
 			stops[stops_rq].downpos = POS;
 			stops_status &= ~(1 << stops_rq);
-			EEPROM.put(0 + (5 * stops_rq), POS);
+			EEPROM.put(200 + (5 * stops_rq), POS);
 			EEPROM.update(100, stops_status);
 			break;
 		}
@@ -866,8 +880,6 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 	if (MEM_reg & (1 << 0)) { //als positie met melders
 		if (changed > 0 && switchcount == 1)SW_melderadres(); //melders veranderd
 	}
-
-
 }
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
 	melderadres = 0;
@@ -892,124 +904,117 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 	}
 	if ((melderTemp > 0 && melderadres == 0) || (melderTemp == 0 && melderadres > 0)) {
 		//dit dient om 'tussenmelderadres' onmogelijk te maken van 3 via 2 naar 0 bv...
-		//Serial.println(switchstatus[1], BIN);
-		//Serial.println(melderadres);
+		//Serial.print(F("Melderadres: ")); Serial.println(melderadres);
 		//hier VERANDERING van melder status
+		MA_changed();
 
-
-		if (GPIOR1 & (1 << 2)) { //als false alleen om positie bij opstarten te bepalen, set and reset in setup
-			if (setcount == 0) {
-				POS_changed();
-			}
-			else {
-				POS_set();
-			}
-		}
 		//Hier is de huidige melder bekend dus:
 		melderOld = melderadres;
 	}
 	melderTemp = melderadres;
 }
-void POS_changed() {
-	//Serial.print(F("poschanged, melder: ")); Serial.println(melderadres);
-	//Hier bekend bij welke positie (sensor actief)
-	//twee situaties opstart en in bedrijf,
-
-	if (GPIOR0 & (1 << 0)) { //searching/homing
-		//dit is de opstart situatie, zoeken naar een bekende positie, als de brug al in een stop staat, is de positie ongeveer bekend
-		//deze waarde wordt in POS geschreven, aan de hand daarvan wordt de volgende verplaatsing berekend. 
-		//twee situaties start in een stop of start tussen twee stops in				
-		//Motor is gestart in RUN_home
-
-		if (melderadres == 0 && melderOld == 1) { //gestart in een stop, melderold is de stop die zojuist vrij is gekomen
-				//alleen bij stop 1 iets doen anders doordraaien, zoeken naar een bekende stop bit0 true van .reg
-				//in RUNhome()is al bepaald dat er niet een start is in een bekende stop
-				//Dus een voorgaande wel bekende stop wordt altijd met .oppos bereikt. dus melderadres > 0
-				//melderold moet hier dus 1 zijn--straks waarde invullen ipv variable melderold
-				//dus positie van de brug is bekend moet hier 0 zijn.
-				//Bereiken van de down melder
-
-			stop();
+void MA_changed() {
+	//nul positie zoeken, dus geen start op bekende stop
+	if (GPIOR0 & (1 << 0)) {
+		if (melderadres == 0 && melderOld == 1) {
+			GPIOR0 &= ~(1 << 0);
 			POS = 0;
-			stops[0].downpos = 0;
-			//motor stoppen
 			stop();
-			setcount = 10;
-			POS_set();
-
+			stops_rq = 0;
+			RUN_rq();
 		}
-		else { //gestart tussen twee stops. Bereiken voorliggende stop op de UP melder
-			if (stops[melderadres].reg & (1 << 0)) { //Posities van deze stop bekend
+	}else if (zoeken) {
+		if (melderadres > 0  && melderOld == 0) {
+			//downmelder gevonden
+			stops[melderadres-1].downpos = POS;
+			Serial.println(POS);
+		}
+		else if (melderadres == 0 && melderOld > 0) {
+			//upmelder gevonden
+			stops[melderOld-1].uppos = POS;
+			stops[melderOld-1].reg &=~(1 << 0);
+			Serial.println(POS);
 
+			if (melderOld == aantalStops) {
+			zoeken = false;
+			stop();	
+			RUN_home();
+			}
+		}
+	}
+	else {
+		DSP_exe(12);
+	}
+
+}
+
+
+void MA_changedold() {//melderadres is veranderd (Melderadres = stop+1)
+	if (GPIOR0 & (1 << 0)) { //searching/homing		
+		//draairichting hier belangrijk
+
+		if (GPIOR0 & (1 << 1)) { //draait up
+			if (melderadres == 0) { //upmelder gepasseerd, melderold heeft nu net vrijgekomen adres 
+
+				//if (stops[melderOld - 1].reg & (1 << 0)) {
+				stops[melderOld - 1].uppos = POS;
+				//Serial.print(F("melderold upp0s: ")); Serial.println(stops[melderOld - 1].uppos);
+				//Hiet MOET de downmelder al zijn bepaald, dus 
+				stops[melderOld - 1].reg &= ~(1 << 0);
+				//}
+
+			   //Nu kijken of deze melder stop het doel stops_rq is
+				if (stops_rq == melderOld - 1) { //melderadres is 1 hoger dan stops, gevraagde stop bereikt
+					stop();
+					//hier is het al fout
+					//*******************************************************
+					//runcenter(stops_rq);
+
+				}
+				// MEM_write(melderOld-1); //ff niet tijdens test eerst posities wissen maken.
+			}
+			else { //downmelder gepasseerd
+				//altijd overschrijven, behalve melderadres 1
+				if (melderadres > 1) {
+					stops[melderadres - 1].downpos = POS;
+				}
 
 			}
-			else {
+		}
+		else { //draait down
+			//Alleen stoppen en opslaan als melderadres 1 = vrijgekomen
+			if (melderadres == 0) { //Downmelder actief
+				if (melderOld == 1) {
+					//positie down van melder 1. stop 0 = altijd 0.
+					stops[0].downpos = 0;
 
+					POS = 0;
+					stop();
+					up;
+					start();
+				}
 			}
-
+			else { //upmelder actief
+				//check of positie van deze stop is vastgelegd
+				if (~stops[melderadres - 1].reg & (1 << 0)) { //bekend				 
+					runcenter(melderadres - 1);
+				}
+			}
 		}
 	}
 	else { //in bedrijf (searching/homing)
-		DSP_exe(12);
+		//Is wel nodig straks voor correctie van de positie ingeval van slippen ofzo
+		DSP_exe(12); //geeft de melder in het display
 	} //(searching/homing)
 }
-void POS_set() {
-	//bepaald en legt vast posities van een stop
-	//tijdens dit proces moeten alle melder veranderingen hier naar toe, met fase counter setcount
-	//direction van bit 1 gpioro geeft aan of de down melder of de up melder deze functie called
-	//Huidige POS is de postie van deze melder. Stopplek is de stop.
-	//
-	//Serial.print(F("setcount: ")); Serial.println(setcount);
-	//Serial.print(F("POS: ")); Serial.println(POS);
-	switch (setcount) {
-	case 10:
-		if (GPIOR0 & (1 << 1)) { //draairichting up
 
-			//stops[melderadres-1].uppos = POS; //melder 1=stop 0 enz. DIT IS VERKEERD!!!!
-		}
-		else { //draairichting down
-			//ondermelder bepaald, richting up en weer gaan draaien
-			up;
-			start(); //GPIOR0 bit 0 nog steeds 1 dus gaat draaen in Vhome
-			setcount = 20; //volgende melder change is up melder
-			setstop = 1;
-		}
-		break;
-
-	case 20://volgende melder change komt hier terecht, verwacht melderold=0; melderadres=1 
-		if (GPIOR0 & (1 << 1)) { //draairichting up
-			//Draait nu terug wacht tot melderold is setstop en melderadres =0 
-			//hier zal iets van een vertraging moeten worden ingebouwd voor denderen van de sensor.
-
-			if (melderOld == setstop && melderadres == 0) {
-				stop();
-				stops[setstop - 1].uppos = POS;
-				//positie nu bepaald
-
-				//Serial.print(F("Downmelder= ")); Serial.print(stops[setstop - 1].downpos);
-				//Serial.print(F("  Upmelder= ")); Serial.println(stops[setstop - 1].uppos);
-
-				//beide posities bekend dus opslaan, 
-				stops[setstop - 1].reg &= ~(1 << 0); //set als bekend bit 0
-				MEM_write(setstop - 1); //melder 1 =stop  0
-
-				//nu naar middenpositie gaan
-				//POS_rq = (stops[setstop - 1].uppos + stops[setstop - 1].downpos) / 2; // +stops[setstop].finepos;
-				POS_rq = stops[setstop-1].downpos + ((stops[setstop-1].uppos - stops[setstop-1].downpos) / 2);
-				//Serial.print(F("POSrq: ")); Serial.println(POS_rq);
-				GPIOR0 &= ~(1 << 0); //homen klaar
-				down; //richting hier even hard doorgeven
-				start();
-				DSP_exe(12);
-				setcount = 0;
-			}
-		}
-		else { //draairichting down
-
-		}
-		break;
-	}
+void runcenter(byte stop) {
+	//Serial.print(F("runcenter POS: ")); Serial.println(POS);
+	GPIOR0 &= ~(1 << 0); //homen klaar, naar in bedrijf
+	stops_rq = stop;
+	RUN_rq();
 }
+
 void SW_off(byte sw) {
 	//Serial.print("uit: "); Serial.println(sw);
 	switch (sw) {
@@ -1067,8 +1072,8 @@ void SW_on(byte sw) {
 		//MELDERS ******
 	case 4:
 		if (~MEM_reg & (1 << 0)) { //als positie met home switch 
-
-		//niet voor testen
+			//Serial.println(F("melder0"));
+			//niet voor testen
 
 			if (GPIOR0 & (1 << 0)) { //home gevonden
 				stop();
@@ -1237,6 +1242,7 @@ void SW_2() {
 	switch (PRG_fase) {
 	case 0: //n bedrijf
 		MOTOR(); //toggled motor aan of uit. Ook vanuit setup...eenmalig 
+
 		break;
 	case 2: //instellen etages
 		PRG_level++;
@@ -1269,10 +1275,12 @@ void SW_2() {
 	}
 }
 void SW_3() {
+	//tijdens positie testen ff uit
 	PRG_fase++;
 	if (PRG_fase > 5)PRG_fase = 0;
 	DSP_prg();
 	PRG_level = 0;
+
 }
 void ET_rq() {
 	PORTD &= ~(1 << 4); //free lock at new position request
@@ -1288,6 +1296,9 @@ void ET_rq() {
 	}
 }
 void RUN_rq() {
+	//Serial.print(F("Run_rq stopsrq= ")); Serial.println(stops_rq);
+	//Serial.print(F("Run_Q: ")); Serial.println(stops_rq);
+	boolean sb = false; //sb=stop bekend
 	if (GPIOR0 & (1 << 5)) { //motor draait
 		if (~GPIOR0 & (1 << 6)) { //iets met afremmen?
 			GPIOR0 |= (1 << 6);
@@ -1295,39 +1306,51 @@ void RUN_rq() {
 	}
 	else {
 		GPIOR0 &= ~(1 << 6);
-
 		if (MEM_reg & (1 << 0)) { //Positie met melders
+			//***************************************************************************************
 			//melderadres 1=stops 0
-			
+			//Serial.print(F("stop(3). POS= ")); Serial.println(POS);
 			if (stops[stops_rq].reg & (1 << 0)) { //POSitie nog niet vastgelegd
-				Serial.println(stops_rq);
-				//positie gaan zoeken.....morgen verder...
-
+				//positie gaan zoeken 
+				up; //Altijd omhoog, lagere stops Moeten al (automatisch) zijn bepaald.
+				zoeken = true;
+				startmotor(); //begin draaien
+				//DSP_exe(11);				
 			}
 			else { //POSitie is bekend
-				POS_rq = stops[stops_rq].downpos + ((stops[stops_rq].uppos - stops[stops_rq].downpos) / 2);
+				POS_rq = stops[stops_rq].downpos+((stops[stops_rq].uppos - stops[stops_rq].downpos) / 2);
+				sb = true;
+				//Serial.print(F(".downpos= ")); Serial.println(stops[stops_rq].downpos);
 			}
-		}
+
+		} //************************************************************************************************
 		else { //Positie met home switch
 			//pos_rq voor stop 1 = hier 0 
-			POS_rq = stops[stops_rq].downpos; 
+			POS_rq = stops[stops_rq].downpos;
+			sb = true;
 		}
 
+		if (sb) {
+			//Serial.print("POS= : "); Serial.print(POS);
+			//Serial.print(F("   Downrq :")); Serial.print(stops[stops_rq].downpos); Serial.print(F("   Uprq :")); Serial.print(stops[stops_rq].uppos);
+			//Serial.print(F("  POSrq: ")); Serial.println(POS_rq);
 
-		if (POS < POS_rq) {
-			up;
-		}
-		else {
-			down;
-		}
 
-		if (POS != POS_rq) { //als al in request stop, dan niet draaien en vrij geven
-			start();
+			if (POS < POS_rq) {
+				up;
+			}
+			else {
+				down;
+			}
+
+			if (POS != POS_rq) { //als al in request stop, dan niet draaien en vrij geven
+				start();
+			}
+			else {
+				PORTD |= (1 << 4); //vrij geven
+			}
 		}
-		else {
-			PORTD |= (1 << 4); //vrij geven
-		}
-	}
+	} //	if (GPIOR0 & (1 << 5)) { //motor draait
 }
 void SW_encoder(boolean dir) {
 	switch (PRG_fase) {

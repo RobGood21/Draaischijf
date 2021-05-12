@@ -28,10 +28,16 @@ bit7 divider voor encoder
 GPIOR1
 bit0 timer versnellen vertragen
 bit1 in Loop call and reset in SLOW(), set in ISR timer 2
-bit2 Initial position bepalen, in setup true is doen, false is gedaan
+bit2 NIET in gebruik ******* oud was Initial position bepalen, in setup true is doen, false is gedaan
+
+
+
+
 
 MEM_reg 
 bit0  Positie met  false=Home  true=melders (default)
+bit1 als in melders, posities bepaald=false; posities nog te bepalen=true
+
 
 EEPROM
 100 spotstatus
