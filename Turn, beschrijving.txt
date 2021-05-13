@@ -4,8 +4,8 @@ Aansluitingen hoog actief maken, alle minnen aan elkaar en aan de GND
 Pin11 (PORTB3) = Puls +
 Pin10 (PORTB2)= Direction +  false = naar beneden
 Pin9(PORTB1) =Enabled + false = draaien
-pin8 Run true als motor draait
-pin4 Lock true als brug vrij is.
+pin8 Run true als motor draait PORTB0
+pin4 Lock true als brug vrij is. PORTD4
 
 DCC modes (tonen +1)
 0=single 1 poort true alleen gebruiken
@@ -28,11 +28,7 @@ bit7 divider voor encoder
 GPIOR1
 bit0 timer versnellen vertragen
 bit1 in Loop call and reset in SLOW(), set in ISR timer 2
-bit2 NIET in gebruik ******* oud was Initial position bepalen, in setup true is doen, false is gedaan
-
-
-
-
+bit2 volgorde SW_read > daarna pas Motor
 
 MEM_reg 
 bit0  Positie met  false=Home  true=melders (default)
@@ -59,3 +55,8 @@ EEPROM
 115 Vaccel
 
 120 Toepassing 0=draaischijf 1=rolbrug 2=lift
+
+stops[].reg register van struct stop
+bit0 Melder volledig opgeslagen
+bit1 width opgeslagen, afstand breedte van de melder
+bit2 afstand tussen bovenrand, upmelder naar onderrand, downmelder volgende stop opgeslagen
