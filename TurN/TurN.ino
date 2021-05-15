@@ -545,20 +545,18 @@ ISR(TIMER2_COMPA_vect) {
 			stop();
 		}
 		else if (POS == POS_rq) {
+
 			if (MEM_reg & (1 << 0)) {//melder mode
-
-				//if (GPIOR1 & (1 << 3)) {
-				Serial.println(F("stop in ISR"));
-
-				stop();
-				runfase = 0;
-				free();
-				GPIOR1 &= ~((1 << 3)); //reset stop flag
-			//}
-			//else {
-
-			//}
-
+				switch (runfase) {
+				case 10:
+					Serial.println(F("stop in ISR"));
+					stop();
+					free();
+					break;
+				case 20:
+					Serial.print(F("pos bereikt"));
+					break;
+				}
 			}
 			else { //home mode
 				stop();
@@ -567,18 +565,7 @@ ISR(TIMER2_COMPA_vect) {
 
 		}
 		else if (POS == POS_calc) {
-			//Serial.print("*");
-			if (MEM_reg & (1 << 0)) {
-				//als op weg naar eindbestemming, laatste deel dan call slow instellen
-				//zodat er langzaam naar de melder gaat. Voorbij de laatste melder, GPIOR1 bit 3 zetten...zodat
-				//de melders niet meer worden gelezen en stoppen in de POS_rq als in de home_mode
-
-
-
-			}
-			else {
-				GPIOR1 |= (1 << 1); //call SLOW() via loop altij in home-mode
-			}
+			GPIOR1 |= (1 << 1); //call SLOW() via loop altij in home-mode	
 		}
 
 	}
@@ -927,11 +914,8 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		//dit dient om 'tussenmelderadres' onmogelijk te maken van 3 via 2 naar 0 bv...
 		//Serial.print(F("Melderadres: ")); Serial.println(melderadres);
 		//hier VERANDERING van melder status
-		if (~GPIOR1 & (1 << 3)) MA_changed(); //Als bit3 =true melders uitschakelen, draaien naar POS_rq en stoppen. 
+		MA_changed(); //Als bit3 =true melders uitschakelen, draaien naar POS_rq en stoppen. 
 		DSP_exe(12);
-		//Hier is de huidige melder bekend
-//zorgen dat meldersadres bekend is voor motor()>run_home()
-
 		if (GPIOR1 & (1 << 2)) { //set in setup
 			GPIOR1 &= ~(1 << 2);
 			MOTOR();
@@ -943,26 +927,31 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 
 void MA_changed() {
 	byte stp;
-	if (melderadres == 0) { //melder vrijgekomen, breedte melder gemeten
-		stp = melderOld - 1; //stop=melder-1
-		//if (GPIOR0 & (1 << 1)) {//richting is niet relevant
-		if (stp != stops_current) {
-			F_width(stp); //Niet bij stop van vertrek, overstaande melder van deze stop moet gepasseerd zijn
+
+	switch (runfase) {
+	case 0: //zoeken naar stops
+		if (melderadres == 0) { //melder vrijgekomen, breedte melder gemeten
+			stp = melderOld - 1; //stop=melder-1
+			//if (GPIOR0 & (1 << 1)) {//richting is niet relevant
+			if (stp != stops_current) {
+				F_width(stp); //Niet bij stop van vertrek, overstaande melder van deze stop moet gepasseerd zijn
+			}
+			else {
+				POS = 0;
+			}
 		}
-		else {
+		else { //melderadres > 0; stop 'melderadres-1' bereikt, afstand gemeten	
+			if (GPIOR0 & (1 << 1)) { //richting. Draait up, downmelder bereikt
+				stp = melderadres - 2; //afstand voorliggende stop zijn bepaald, dus -2
+				//testen bit of al opgeslagen hoeft niet, want dit is een zoekactie....
+			}
+			else { //draait down, upmelder bereikt
+				stp = melderadres - 1; //afstand tot deze stop is bepaald dus -1
+			}
+			F_pos(stp);
 			POS = 0;
 		}
-	}
-	else { //melderadres > 0; stop 'melderadres-1' bereikt, afstand gemeten	
-		if (GPIOR0 & (1 << 1)) { //richting. Draait up, downmelder bereikt
-			stp = melderadres - 2; //afstand voorliggende stop zijn bepaald, dus -2
-			//testen bit of al opgeslagen hoeft niet, want dit is een zoekactie....
-		}
-		else { //draait down, upmelder bereikt
-			stp = melderadres - 1; //afstand tot deze stop is bepaald dus -1
-		}
-		F_pos(stp);
-		POS = 0;
+		break;
 	}
 }
 void F_width(byte stp) { //breedte van een melder bepaald
@@ -981,8 +970,7 @@ void F_width(byte stp) { //breedte van een melder bepaald
 		}
 
 		RUN_rq();
-		GPIOR1 |= (1 << 3); //stoppen als POS==POS_rq
-		//runfase = 20;
+		runfase = 10;
 		monitor();
 	}
 
@@ -1314,36 +1302,55 @@ void RUN_rq() {
 }
 void RUN_rq_M() { //called from et_rq (stops_rq==stopscurrent komt niet voor)
 	boolean bekend = true;
+	runfase = 0;
 	//stops_rq=waar die naar toe moet, stop_current staat tie in
 	POS = 0; //zet huidige positie op 0
-
+	long dist = stops[stops_current].width / 2; //van middenpunt naar melder(.fine moet hier nog bij komen)
 	//kijken of route bekend is
 	if (stops_rq > stops_current) {
 		up; //vreemde plek alleen functioneel als bekend false blijkt te zijn, scheelt een if statement
 		for (byte i = stops_current; i < stops_rq; i++) { //alle route delen moeten bekend zijn.
-			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naat bovenstop (niet) bekend
+			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naat bovenstop (niet) bekend			
 			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder bekend
+			if (stops[i + 1].reg & (1 << 1))bekend = false;
+
+			dist = dist + stops[i].pos;
+			if (i != stops_current) dist = dist + stops[i].width;
 		}
 	}
 	else { //rq<current
 		down; //zie up
 		for (byte i = stops_rq; i < stops_current; i++) { //alle route delen moeten bekend zijn.
-			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naat bovenstop (niet) bekend
-			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder bekend
+			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naar bovenstop (niet) bekend
+			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder (niet) bekend aankomst stop
+			if (stops[i + 1].reg & (1 << 1))bekend = false; //breedte melder bekend vertrek stop
+
+			dist = dist + stops[i].pos;
+			if (i != stops_rq) dist = dist + stops[i].width;
 		}
 	}
-	if (bekend) {
 
+	if (bekend) {
+		runfase = 20;
+		Serial.print(F("dist=")); Serial.println(dist);
+		GPIOR1 |= (1 << 3); //melders uitschakelen, tempie
+
+		if (GPIOR0 & (1 << 1)) { //richting up
+			POS = 0;
+			POS_rq = dist;
+		}
+		else { //richting down
+			POS_rq = 0;
+			POS = dist;
+		}
+		RUN_rq();
 	}
 	else { //niet bekend
-	Serial.println(F("run_rq motorstart"));
-	OCR2A = Vhome;
-	startmotor();
-	runfase = 10;
+		runfase = 0;
+	//Serial.println(F("run_rq niet bekend"));
+		OCR2A = Vhome;
+		startmotor();
 	}
-
-
-
 }
 void SW_encoder(boolean dir) {
 	switch (PRG_fase) {
