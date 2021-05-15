@@ -114,6 +114,15 @@ void setup() {
 	GPIOR0 = 0;
 	GPIOR1 = 0;
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+	/*
+	Dit display is 128x64 pixels. Een pixel kan aan of uit zijn.
+	Totaal dus 8192 pixels.
+	Verdeeld over 1024 bytes.
+	Gebruik van deze library/display bezet dus 1024bytes is helft van het geheugen van de arduino.
+	Overhead van de arduino is ongeveer een 10% van het geheugen, dus kan maar 40% van het memory worden gebruikt voor de rest. Ongeveer 850bytes.
+	Overloop van het geheugen veroorzaakt enorm vreemde onvoorspeelbare  fouten.
+	*/
+
 	//**begin Setup for DeKoder 
 	//Serial.begin(9600);
 	//interrupt on PIN2
@@ -159,8 +168,8 @@ void setup() {
 
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen
-	GPIOR1 |= (1 << 2);
-	SW_read(); //V3.0 bepaal of een van de stops actief is, lees schakelaars
+		GPIOR1 |= (1 << 2);
+		SW_read(); //V3.0 bepaal of een van de stops actief is, lees schakelaars
 	}
 	else { //home mode direct naar home melder zoeken
 		MOTOR();
@@ -531,35 +540,48 @@ ISR(TIMER2_COMPA_vect) {
 		POS--;
 	}
 
-	//voor melder-mode moet dit helemaal anders
 	if (~GPIOR0 & (1 << 0)) { //niet home 
-		if (POS == 0) {
+		if (POS == 0 && ~MEM_reg & (1 << 0)) { //only in home-mode
 			stop();
 		}
 		else if (POS == POS_rq) {
 			if (MEM_reg & (1 << 0)) {//melder mode
-				switch (runfase) {
-				case 20: //eind positie bereeikt
-					stop();
-					runfase = 0;
-					free();
-					break;
-				}
 
+				//if (GPIOR1 & (1 << 3)) {
+				Serial.println(F("stop in ISR"));
 
+				stop();
+				runfase = 0;
+				free();
+				GPIOR1 &= ~((1 << 3)); //reset stop flag
+			//}
+			//else {
 
-			} else{ //home mode
-			stop();
-			PORTD |= (1 << 4); //lock bridge on
+			//}
+
+			}
+			else { //home mode
+				stop();
+				PORTD |= (1 << 4); //lock bridge on
 			}
 
 		}
 		else if (POS == POS_calc) {
-			GPIOR1 |= (1 << 1); //call SLOW() via loop
+			//Serial.print("*");
+			if (MEM_reg & (1 << 0)) {
+				//als op weg naar eindbestemming, laatste deel dan call slow instellen
+				//zodat er langzaam naar de melder gaat. Voorbij de laatste melder, GPIOR1 bit 3 zetten...zodat
+				//de melders niet meer worden gelezen en stoppen in de POS_rq als in de home_mode
+
+
+
+			}
+			else {
+				GPIOR1 |= (1 << 1); //call SLOW() via loop altij in home-mode
+			}
 		}
+
 	}
-
-
 }
 void FAST() { //versnellen tijd gebaseerd
 	if (millis() - accTijd > accStep) {
@@ -905,9 +927,11 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		//dit dient om 'tussenmelderadres' onmogelijk te maken van 3 via 2 naar 0 bv...
 		//Serial.print(F("Melderadres: ")); Serial.println(melderadres);
 		//hier VERANDERING van melder status
-		MA_changed();
+		if (~GPIOR1 & (1 << 3)) MA_changed(); //Als bit3 =true melders uitschakelen, draaien naar POS_rq en stoppen. 
+		DSP_exe(12);
 		//Hier is de huidige melder bekend
-		//zorgen dat meldersadres bekend is voor motor()>run_home()
+//zorgen dat meldersadres bekend is voor motor()>run_home()
+
 		if (GPIOR1 & (1 << 2)) { //set in setup
 			GPIOR1 &= ~(1 << 2);
 			MOTOR();
@@ -915,64 +939,60 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		melderOld = melderadres;
 	}
 	melderTemp = melderadres;
-
-
 }
 
 void MA_changed() {
-	byte stp; //om niet telekens -1 te hoeven typen (en vergeten)
-	//lastup/lastdown=laatst gemuteerde melder, om denderen van de sensoren te ondervangen
-	switch (runfase) {
-	case 10: //start proces zoeken positie van een melder, motor draait hier
-		//Serial.print(F("POS = ")); Serial.println(POS);
-		if (GPIOR0 & (1 << 1)) { //richting up
-			if (melderadres == 0) { //upmelder	
-				stp = melderOld - 1; //stop=melder-1
-				//lastup = stp;
-				//bij up draaien heeft POS nu de width van deze melder
-
-				if (stp != stops_current) { //Niet bij de vertrekkende melder
-					if (stops[stp].reg & (1 << 1)) { //width nog niet opgeslagen
-						stops[stp].reg &= ~(1 << 1);
-						stops[stp].width = abs(POS); //POS; maakt een negatief getal positief (hoop ik...)
-						if (~stops[stp].reg & (1 << 2))stops[stp].reg &= ~(1 << 0); //melder volledig opgeslagen
-					}
-				}				
-
-				if (stp == stops_rq) {
-					stop();
-					//hier is van de stops_rq melder de width bekend
-					POS_rq = stops[stp].width / 2;
-					RUN_rq();
-					runfase = 20;
-					monitor();
-				}
-				else {
-					POS = 0;//reset position voor volgende meting
-				}
-
-			}
-			else { //downmelder, bij updraaien wordt deze als eerst bereikt
-
-				stp = melderadres - 2; //waardes voorliggende stop zijn bepaald, dus -2
-				//bij updraaien heeft POS nu de afstand tot de upmelder van de voorliggende stop
-				if (stops[stp].reg & (1 << 2)) { //width nog niet opgeslagen
-					stops[stp].reg &= ~(1 << 2);
-					stops[stp].pos = POS;
-					if (~stops[stp].reg & (1 << 1))stops[stp].reg &= ~(1 << 0); //melder volledig opgeslagen
-				}
-				POS = 0;
-			}
+	byte stp;
+	if (melderadres == 0) { //melder vrijgekomen, breedte melder gemeten
+		stp = melderOld - 1; //stop=melder-1
+		//if (GPIOR0 & (1 << 1)) {//richting is niet relevant
+		if (stp != stops_current) {
+			F_width(stp); //Niet bij stop van vertrek, overstaande melder van deze stop moet gepasseerd zijn
 		}
-		else { //richting down
-			if (melderadres == 0) { //downmelder
-			}
-			else { //upmelder
-			}
+		else {
+			POS = 0;
 		}
-		break;
 	}
-	DSP_exe(12);
+	else { //melderadres > 0; stop 'melderadres-1' bereikt, afstand gemeten	
+		if (GPIOR0 & (1 << 1)) { //richting. Draait up, downmelder bereikt
+			stp = melderadres - 2; //afstand voorliggende stop zijn bepaald, dus -2
+			//testen bit of al opgeslagen hoeft niet, want dit is een zoekactie....
+		}
+		else { //draait down, upmelder bereikt
+			stp = melderadres - 1; //afstand tot deze stop is bepaald dus -1
+		}
+		F_pos(stp);
+		POS = 0;
+	}
+}
+void F_width(byte stp) { //breedte van een melder bepaald
+	Serial.println(F("F_width"));
+	stops[stp].reg &= ~(1 << 1);
+	stops[stp].width = abs(POS); //altijd een positieve waarde
+	if (stp == stops_rq) {
+		stop();
+		//hier is van de stops_rq melder de width bekend
+
+		if (POS > 0) {
+			POS_rq = POS - stops[stp].width / 2;
+		}
+		else {
+			POS_rq = POS + stops[stp].width / 2;
+		}
+
+		RUN_rq();
+		GPIOR1 |= (1 << 3); //stoppen als POS==POS_rq
+		//runfase = 20;
+		monitor();
+	}
+
+	else {
+		POS = 0;//reset position voor volgende meting
+	}
+}
+void F_pos(byte stp) {
+	stops[stp].reg &= ~(1 << 2);
+	stops[stp].pos = abs(POS); // Altijd positief waarde
 }
 void monitor() {
 	//geeft debug data
@@ -1292,24 +1312,38 @@ void RUN_rq() {
 		}
 	} //	if (GPIOR0 & (1 << 5)) { //motor draait
 }
-void RUN_rq_M() { //called from RUN_rq 
-	if (stops[stops_rq].reg & (1 << 0)) { //POSitie nog niet vastgelegd
-	//positie gaan zoeken
-		//motor in Vhome zoeken naar de juiste stop
-		if (stops_rq > stops_current) {
-			up;
+void RUN_rq_M() { //called from et_rq (stops_rq==stopscurrent komt niet voor)
+	boolean bekend = true;
+	//stops_rq=waar die naar toe moet, stop_current staat tie in
+	POS = 0; //zet huidige positie op 0
+
+	//kijken of route bekend is
+	if (stops_rq > stops_current) {
+		up; //vreemde plek alleen functioneel als bekend false blijkt te zijn, scheelt een if statement
+		for (byte i = stops_current; i < stops_rq; i++) { //alle route delen moeten bekend zijn.
+			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naat bovenstop (niet) bekend
+			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder bekend
 		}
-		else { //
-			down;
-		}
-		OCR2A = Vhome;
-		startmotor();
-		runfase = 10;
 	}
-	else { //POSitie is bekend	
+	else { //rq<current
+		down; //zie up
+		for (byte i = stops_rq; i < stops_current; i++) { //alle route delen moeten bekend zijn.
+			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naat bovenstop (niet) bekend
+			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder bekend
+		}
+	}
+	if (bekend) {
+
+	}
+	else { //niet bekend
+	Serial.println(F("run_rq motorstart"));
+	OCR2A = Vhome;
+	startmotor();
+	runfase = 10;
+	}
 
 
-	}
+
 }
 void SW_encoder(boolean dir) {
 	switch (PRG_fase) {
@@ -1422,6 +1456,7 @@ void SW_encoder(boolean dir) {
 void free() {
 	//doet alles om de brug te vergrendelen en vrij te geven vor next gebruik
 	//voorlopig alleen groene ledje op PIN4
+	stops_current = melderadres - 1;
 	PORTD |= (1 << 4); //lock bridge on
 
 }

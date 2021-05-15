@@ -29,6 +29,7 @@ GPIOR1
 bit0 timer versnellen vertragen
 bit1 in Loop call and reset in SLOW(), set in ISR timer 2
 bit2 volgorde SW_read > daarna pas Motor
+bit3 bij POS==POS_rq; als true stoppen, als false volgende POS_rq instellen
 
 MEM_reg 
 bit0  Positie met  false=Home  true=melders (default)
