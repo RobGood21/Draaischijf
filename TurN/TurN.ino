@@ -41,21 +41,25 @@ Instelling keuze toepassing 0=draaischijf, 1=rolbrug, 2=lift
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
 //**Declaraties for DeKoder
+
+//V3.00 Aantal buffers va 6 > 4 gebracht om geheugen ruimte te sparen. NIET GECHECKED! 
+
 volatile unsigned long DEK_Tperiode; //laatst gemeten tijd 
 volatile unsigned int DEK_duur; //gemeten duur van periode tussen twee interupts
 //boolean DEK_Monitor = false; //shows DCC commands as bytes
 byte DEK_Reg; //register voor de decoder 
 byte DEK_Status = 0;
-byte DEK_byteRX[6]; //max length commandoos for this decoder 6 bytes (5x data 1x error check)
+byte DEK_byteRX[4]; //max length commandoos for this decoder 6 bytes (5x data 1x error check)
 byte DEK_countPA = 0; //counter for preample
-byte DEK_BufReg[6]; //registerbyte for 12 command buffers, can be lowered.
-byte DEK_Buf0[6];
-byte DEK_Buf1[6];
-byte DEK_Buf2[6];
-byte DEK_Buf3[6];
-byte DEK_Buf4[6];
-byte DEK_Buf5[6];
+byte DEK_BufReg[4]; //registerbyte for 12 command buffers, can be lowered.
+byte DEK_Buf0[4];
+byte DEK_Buf1[4];
+byte DEK_Buf2[4];
+byte DEK_Buf3[4];
+byte DEK_Buf4[4];
+byte DEK_Buf5[4];
 //**End declaration for deKoder
+
 byte DCC_adres;
 byte DCC_mode; //EEPROM 
 byte COM_reg;
@@ -110,6 +114,9 @@ float puls;
 unsigned long accTijd; //verstreken tijd
 byte runfase;
 
+//temps
+
+
 void setup() {
 	Serial.begin(9600);
 	//clear hardware registers 
@@ -137,26 +144,27 @@ void setup() {
 
 
 	cd; //clear display
-	DSP_settxt(10,10, 1); display.print(F("www.wisselmotor.nl"));
-	DSP_settxt(10,30,2); display.print("TurN V3.0");
+	DSP_settxt(10, 10, 1); display.print(F("www.wisselmotor.nl"));
+	DSP_settxt(10, 30, 2); display.print("TurN V3.0");
 	display.display();
-	delay(2000);	
+	delay(2000);
 
 	//ports
 	PORTC |= (15 << 0); //pullup  A0~A3
+
 	DDRB |= (15 << 0); //Pin8~Pin11 as outputs
 	DDRD |= (1 << 4); //pin4 as output (groene led) lock
-	
+
 	//PINB |= (1 << 0); //set pin8 V3.00 uit waarom moet dit hier...?
 	//DDRD |= (B11110000 << 0); //pin 7,6,5,4 output
 	//factory reset
-	
+
 	DDRD |= (1 << 7); //set pins om switches uit te lezen voor de factory reset 
-	PORTD &=~(1 << 7);
+	PORTD &= ~(1 << 7);
 	//Serial.println(PINC);
 	if (PINC == 54) {
 		cd;
-		DSP_settxt(10,15,2); display.print(F("Factory"));
+		DSP_settxt(10, 15, 2); display.print(F("Factory"));
 		DSP_settxt(10, 50, 1); display.print(F("Druk reset..."));
 		display.display();
 		delay(500);
@@ -176,9 +184,10 @@ void setup() {
 	switchstatus[0] = 0xFF;
 	switchstatus[1] = 0xFF;
 	switchstatus[2] = 0xFF;
+
+
 	switchcount = 2; //zorgt ervoor dat eerst switchstatus 0 wordt getest, noodzakelijk, anders opstartproblemen
 	MEM_read();
-
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen	
 		GPIOR1 |= (1 << 2); //motor pas nadat er een change in de melderstatus is geweest.
@@ -451,7 +460,6 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 }
 void start() {
 	//Serial.print(F("Start POS= ")); Serial.println(POS);
-
 	PORTD &= ~(1 << 4); //free lock
 	if (GPIOR0 & (1 << 3)) { //motor aan
 		OCR2A = Vhome;
@@ -531,7 +539,7 @@ void MOTOR() {
 			stops_current = 0;
 			stops_rq = 0;
 			runfase = 0;
-			if(melderadres>0) GPIOR1 |= (1 << 4); //niet vrij geven als noodstop in melder
+			if (melderadres > 0) GPIOR1 |= (1 << 4); //niet vrij geven als noodstop in melder
 		}
 		RUN_home();
 	}
@@ -548,7 +556,7 @@ void RUN_home() { //move to HOME	//Serial.println(melderadres);
 		stops_rq = melderadres - 1;
 		DSP_exe(12);
 		stop();
-		free();
+		lock(); //hmmm V3.00 denk ik niet hier....
 		stops_current = stops_rq;
 		//POS = 0;
 	}
@@ -580,12 +588,10 @@ ISR(TIMER2_COMPA_vect) {
 				case 10:
 					//Serial.println(F("stop in ISR"));
 					stop();
-					free();
+					lock();
 					break;
 
 				case 20:
-
-
 					if (melderadres == 0) { //bereikt voor stop edge melder, dus te kort gedraait
 						runfase = 30;
 						//Serial.println(F("pos bereikt"));
@@ -854,6 +860,7 @@ void DSP_prg() {
 	case 1://handmatig
 		DSP_exe(30);
 		break;
+
 	case 2: //bepaal etages
 		switch (PRG_level) {
 		case 0: //kiezen stops
@@ -889,66 +896,87 @@ void DSP_settxt(byte X, byte Y, byte size) {
 	if (X + Y > 0) display.setCursor(X, Y);
 }
 void SW_read() { //lezen van schakelaars, called from loop and setup, before motorstart
-	//Dit werkt alleen met pullups naar 5V van 1K (interne pullup is te zwak)
-	byte sr = 0; byte changed = 0; byte v = 0;
-	switchcount++;
-	if (switchcount > 2)switchcount = 0;
-	DDRD &= ~(B11100000); //set H-z pin 7,6,5
-	/*
-	Schakelaars werken als volgt.
-	pinnen 7,6,5 in de setup worden ze gezet als input met pull up. Pinnen zijn dan hi-Z
-	achtereenvolgend wordt 1 van de pinnen als output gezet en laag.
-	Doordat de twee andere pinnen Hi-z staan kan er geen 'sluiting' ontstaan.
-	De C-port wordt nu gelezen en bevat de actuele status van de schakelaars overeenkomend 
-	met de als output gemaakte pin.
-	Verder is er een issue met de snelheid, te traag zal de encoder niet lekker laten werken. 
-	En een issue met de opstart situatie, switchcount 0 moet als eerste woren gelezen. In setup is daaom switchcount 
-	op 2 gezet.
-	*/
-	//PORTD |= (B11100000);
-	switch (switchcount) {
-	case 0:
-		DDRD |= (1 << 7);
-		PORTD &= ~(1 << 7); //set pin		
-		break;
-	case 1:
-		DDRD |= (1 << 6);
-		PORTD &= ~(1 << 6); //set pin
-		break;
-	case 2:
-		DDRD |= (1 << 5);
-		PORTD &= ~(1 << 5); //set pin
-		break;
-	}
-	sr = PINC << 4;
-	sr = sr >> 4;
-	//sr |= (B11110000 << 0); //set bits 7~4
-	//if (GPIOR1 & (1<<2))Serial.println(switchcount);
-	changed = sr ^ switchstatus[switchcount];
+	byte sr; byte changed; byte v;
+	GPIOR1 ^= (1 << 5);
+	if (~GPIOR1 & (1 << 5)) { //instellen GPIOR1
+		switchcount++;
+		if (switchcount > 2)switchcount = 0;
+		//DDRD &= ~(B11100000); //set H-z pin 7,6,5
 
-	for (byte i = 0; i < 4; i++) {
-		if (changed & (1 << i)) {
-			if (~sr & (1 << i)) {
-				SW_on(i + 4 * switchcount);
-			}
-			else {
-				SW_off(i + 4 * switchcount);
+		switch (switchcount) {
+		case 0:
+			DDRD &= ~(1 << 5);
+			DDRD &= ~(1 << 6);
+			DDRD |= (1 << 7);
+			PORTD &= ~(1 << 7); //set pin			
+			break;
+		case 1:
+			DDRD &= ~(1 << 5);
+			DDRD &= ~(1 << 7);
+
+			DDRD |= (1 << 6);
+			PORTD &= ~(1 << 6); //set pin	break;	
+			break;
+		case 2:
+			DDRD &= ~(1 << 6);
+			DDRD &= ~(1 << 7);
+
+			DDRD |= (1 << 5);
+			PORTD &= ~(1 << 5); //set pin
+			break;
+		}
+	} //GPIOR1
+	else { //lezen GPIOR1	
+		//Dit werkt alleen met pullups naar 5V van 1K (interne pullup is te zwak)
+		/*
+		Schakelaars werken als volgt.
+		pinnen 7,6,5 in de setup worden ze gezet als input met pull up. Pinnen zijn dan hi-Z
+		achtereenvolgend wordt 1 van de pinnen als output gezet en laag.
+		Doordat de twee andere pinnen Hi-z staan kan er geen 'sluiting' ontstaan.
+		De C-port wordt nu gelezen en bevat de actuele status van de schakelaars overeenkomend
+		met de als output gemaakte pin.
+		Verder is er een issue met de snelheid, te traag zal de encoder niet lekker laten werken.
+		En een issue met de opstart situatie, switchcount 0 moet als eerste woren gelezen. In setup is daaom switchcount
+		op 2 gezet.
+
+		na V3.00
+		boolean GPIOR1 bit5 maakt de read cyslus in twee delen, Eerste doorloop worden pinnen NAAR de schakelaar alle
+		Hoog Z gezet. In de tweede doorloop wordt dan de C poort gelezen.
+		19mei2021 schjnt nu goed te werken, in 1 doorloop waren telkens wisselende fouten bij opstarten
+
+
+		*/
+		//	sr = PINC;
+		sr = PINC << 4;
+		sr = sr >> 4;
+		//	sr |=(B11110000);
+
+		changed = sr ^ switchstatus[switchcount];
+		//if (changed > 0) Serial.println("ch");
+		for (byte i = 0; i < 4; i++) {
+			if (changed & (1 << i)) {
+				if (~sr & (1 << i)) {
+					SW_on(i + 4 * switchcount);
+				}
+				else {
+					SW_off(i + 4 * switchcount);
+				}
 			}
 		}
-	}
-	switchstatus[switchcount] = sr;
 
-	if (MEM_reg & (1 << 0)) { //als positie met melders
-		//if (GPIOR1 & (1 << 2)) SW_melderadres();
-		if (changed > 0 && switchcount == 1)SW_melderadres(); //melders veranderd
-	}
+		switchstatus[switchcount] = sr;
 
+		if (MEM_reg & (1 << 0)) { //als positie met melders
+			//if (GPIOR1 & (1 << 2)) SW_melderadres();
+			if (changed > 0 && switchcount == 1)SW_melderadres(); //melders veranderd
+		}
+
+	} //GPIOR1
 }
 
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
 	melderadres = 0;
-	//Serial.println(F("SW_melderadres"));
-	//Serial.println(switchstatus[1], BIN);// zijn de melders
+	//Serial.print(F("SW_melderadres, switchstatus: ")); Serial.println(switchstatus[1], BIN);// zijn de melders
 	for (byte i = 0; i < 4; i++) {
 		if (~switchstatus[1] & (1 << i)) {
 			switch (i) {
@@ -1203,9 +1231,11 @@ void SW_0(boolean onoff) { //up
 			SW_encoder(true);
 			break;
 		case 1: //handmatig instellen
+			//dient alleen tjdens bouwen om de motor te kunnen laten draaien.
 			up;
 			start();
 			break;
+
 		case 2: //instellen etages
 			switch (PRG_level) {
 			case 0:
@@ -1240,6 +1270,7 @@ void SW_0(boolean onoff) { //up
 			stop();
 			DSP_exe(30);
 			break;
+
 		case 2:
 			if (PRG_level == 1) {
 				stop();
@@ -1293,6 +1324,7 @@ void SW_1(boolean onoff) { //down
 		case 1:
 			stop();
 			DSP_exe(30);
+
 			break;
 		case 2:
 			if (PRG_level == 1) {
@@ -1342,10 +1374,10 @@ void SW_2() {
 void SW_3() {
 	if (~GPIOR0 & (1 << 5)) { //motor draait niet
 	//tijdens positie testen ff uit
-	PRG_fase++;
-	if (PRG_fase > 5)PRG_fase = 0;
-	DSP_prg();
-	PRG_level = 0;
+		PRG_fase++;
+		if (PRG_fase > 5)PRG_fase = 0;
+		DSP_prg();
+		PRG_level = 0;
 	}
 }
 void ET_rq() {
@@ -1445,9 +1477,9 @@ void SW_encoder(boolean dir) {
 	switch (PRG_fase) {
 	case 0:
 		if (~GPIOR0 & (1 << 5)) { //als motor draait keuze nieuwe stop niet mogelijk
-		ENC_select(dir);
-		ET_rq();
-		DSP_exe(12);
+			ENC_select(dir);
+			ET_rq();
+			DSP_exe(12);
 		}
 		break;
 	case 1: //handmatig
@@ -1551,16 +1583,21 @@ void SW_encoder(boolean dir) {
 		break;
 	}
 }
-void free() {
+void lock() {
 	//doet alles om de brug te vergrendelen en vrij te geven vor next gebruik
 	//voorlopig alleen groene ledje op PIN4
 	//issue na noodstop BINNEN een melder mag brug niet vrij worden gegeven
 	//eventueel automatisch verplaatsen? kan hier ook maar voorlopig alleen led niet vrijgeven
 	stops_current = melderadres - 1;
-	if(~GPIOR1 & (1<<4)) PORTD |= (1 << 4); //lock bridge on, NOT after noodstop
+	if (~GPIOR1 & (1 << 4)) PORTD |= (1 << 4); //lock bridge on, NOT after noodstop
 	GPIOR1 &= ~(1 << 4);
 	runfase = 0;
 }
+void free() {
+	//Maakt de brug vrij om te kunnen draaien
+	PORTD &= ~(1 << 4); //groene led, lock low
+}
+
 void ENC_fine(boolean dir) {
 	if (dir) {
 		down;
@@ -1584,23 +1621,17 @@ void ENC_select(boolean dir) {
 	}
 }
 void loop() {
-	//tbv dekoder
-	DEK_DCCh();
-	slowcount++;
-
-	if (slowcount > 200) {
-		slowcount = 0;
+	
+	DEK_DCCh();//tbv dekoder
+	slowcount++;//Counter voor langzame processen 1xin 255 cycli
+	if (slowcount == 0) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
 		SW_read();
-
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
 		if (GPIOR1 & (1 << 1))SLOW(); //vertragen
-
 		count++;
 		if (count == 0) {
 			if (GPIOR0 & (1 << 6))RUN_rq();
 			if (COM_reg & (1 << 0))ET_rq();
 		}
-
 	}
-
 }

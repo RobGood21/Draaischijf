@@ -31,7 +31,7 @@ bit1 in Loop call and reset in SLOW(), set in ISR timer 2
 bit2 Bij opstarten (setup) en sw_melderadres, flag als true eerst een change in melderstatus, daarna motor()
 bit3 bij POS==POS_rq; als true stoppen, als false volgende POS_rq instellen
 bit4 Na noodstop in melder, brug NIET vrijgeven tot er een nieuwe stops is bereikt
-
+bit 5 sw_read pulsserend uitvoeren, telkens een pauze nemen, dus lees puls versmallen
 
 
 MEM_reg 
