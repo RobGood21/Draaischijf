@@ -194,7 +194,7 @@ void setup() {
 		//SW_read(); //V3.0 bepaal of een van de stops actief is, lees schakelaars
 	}
 	else { //home mode direct naar home melder zoeken
-		MOTOR();
+		MOTOR(true,false);
 	}
 
 	//MOTOR();
@@ -503,32 +503,51 @@ void start() {
 	}
 }
 void startmotor() {
-	TCCR2B |= (1 << 3);
+	PORTB &= ~(1 << 1); //enable motor, ENA van driver 
+
+	TCCR2B |= (1 << 3); //enable interrupt prescaler 
 	TIMSK2 |= (1 << 1); //enable interupt 
-	GPIOR0 |= (1 << 5);
-	PORTB |= (1 << 0);//Run led rood
-	EIMSK &= ~(1 << INT0); //disable DCC receive
+	GPIOR0 |= (1 << 5); //flag true motor draait, false motor staat stil
+
+	GPIOR1 |= (1 << 6); //disable switches
+
+	PORTB |= (1 << 0); //Run led rood
+	EIMSK &= ~(1 << INT0); //disable DCC receive, ontvangst niet mogelijk
 }
 void stop() {
 	//Serial.print(F("stop. POS= ")); Serial.println(POS);
-	TCCR2B &= ~(1 << 3);
-	TIMSK2 &= ~(1 << 1);
-	GPIOR0 &= ~(1 << 4);
-	GPIOR0 &= ~(1 << 5);
-	PORTB &= ~(1 << 0); //Run led 
-	EIMSK |= (1 << INT0); //enable DCC receive
+	TCCR2B &= ~(1 << 3); //disable interrupt prescaler
+	TIMSK2 &= ~(1 << 1); //disable interrupt
+	GPIOR0 &= ~(1 << 4); //motor vertragen. Vertragen/versnellen flag
+	GPIOR0 &= ~(1 << 5); //Flag motor draait niet
+	GPIOR1 &= ~(1 << 6); //enable switches
+
+	PORTB &= ~(1 << 0); //Run led uit
+	EIMSK |= (1 << INT0); //enable DCC receive, ontvangst DCC mogelijk
 
 }
-void MOTOR() {
+void MOTOR(boolean toggle,boolean offon) { //true komt denk ik niet voor dus kan eenvoudiger met 1 boolean
 	//Serial.println(F("Motor"));
-	GPIOR0 ^= (1 << 3);
-	if (~GPIOR0 & (1 << 3)) {
-		PORTB |= (1 << 1);
-		stop();
-		DSP_exe(20);
+	if (toggle) {
+		GPIOR0 ^= (1 << 3); //Motor aan of uit 
 	}
 	else {
-		PORTB &= ~(1 << 1);
+		if (offon) {
+			GPIOR0 |= (1 << 3); //on
+		}
+		else {
+			GPIOR0 &= ~(1 << 3); //off
+		}
+	}
+
+	if (~GPIOR0 & (1 << 3)) { //Motor uit
+		PORTB |= (1 << 1); //disable motor, ENA van motor driver
+		stop();
+		DSP_exe(20);
+		GPIOR1 |= (1 << 6); //disable switches 
+	}
+	else {
+		PORTB &= ~(1 << 1); //enable motor, ENA laag van de motordriver
 		//na noodstop moet alle waardes worden gereset in melder-mode
 		//NIET in home-mode want die waardes zijn handmatig ingevoerd
 		//tis voldoende de .reg bytes te resetten.
@@ -551,17 +570,15 @@ void RUN_home() { //move to HOME	//Serial.println(melderadres);
 	//Serial.println(F("run_home"));
 //Serial.println(melderadres);
 	if (MEM_reg & (1 << 0) && melderadres > 0) { //Melder-mode	
-
 		//Als brug in een stop staat niks doen in melder-mode
 		stops_rq = melderadres - 1;
 		DSP_exe(12);
 		stop();
 		lock(); //hmmm V3.00 denk ik niet hier....
 		stops_current = stops_rq;
-		//POS = 0;
 	}
 	else { //home-mode of op tussengebied, geen active melder	
-
+		runfase = 0;
 		down;
 		GPIOR0 |= (1 << 0); //home zoeken
 		start();
@@ -582,7 +599,6 @@ ISR(TIMER2_COMPA_vect) {
 			stop();
 		}
 		else if (POS == POS_rq) {
-
 			if (MEM_reg & (1 << 0)) {//melder mode
 				switch (runfase) {
 				case 10:
@@ -755,7 +771,7 @@ void DSP_exe(byte txt) {
 		regelb; display.print("X");
 		break;
 	case 21:
-		regelb; display.print("-");
+		regelb; display.print("-"); //***********KAN WEG???? V3.00
 		break;
 	case 30://handmatig instellen
 		regel1s; display.print(F("Handmatig, positie"));
@@ -830,11 +846,21 @@ void DSP_exe(byte txt) {
 		case 0:
 			display.print(""); display.print(F("Posities met..")); regel2;
 
-			if (MEM_reg & (1 << PRG_level)) {
+			if (MEM_reg & (1 << 0)) {
 				display.print(F("Melders"));
 			}
 			else {
 				display.print(F("Home"));
+			}
+			break;
+		case 1:
+			display.print(""); display.print(F("Encoder mode..")); regel2;
+
+			if (MEM_reg & (1 << 1)) {
+				display.print(F(">>"));
+			}
+			else {
+				display.print(F("<<"));
 			}
 			break;
 		}
@@ -855,8 +881,10 @@ void DSP_exe(byte txt) {
 void DSP_prg() {
 	switch (PRG_fase) {
 	case 0: //in bedrijf
-		DSP_exe(21); //12
+		MOTOR(false, false);
+		//DSP_exe(21); //12
 		break;
+
 	case 1://handmatig
 		DSP_exe(30);
 		break;
@@ -998,7 +1026,7 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 
 	if (GPIOR1 & (1 << 2)) { //set in setup
 		GPIOR1 &= ~(1 << 2);
-		MOTOR();
+		MOTOR(true,false);
 	}
 
 
@@ -1125,7 +1153,15 @@ void SW_off(byte sw) {
 			break;
 		case 13:
 			ENC_count = 0;
-			SW_encoder(true);
+			if (MEM_reg & (1 << 1)) { //richting encoder, meerdere types 
+				SW_encoder(false); //V3.00 richting encoder instelbaar
+			}
+			else {
+				SW_encoder(true); //V3.00 richting encoder instelbaar
+			}
+
+
+
 			break;
 		default:
 			ENC_count = 0;
@@ -1136,7 +1172,12 @@ void SW_off(byte sw) {
 		switch (ENC_count) {
 		case 3:
 			ENC_count = 0;
-			SW_encoder(false);
+			if (MEM_reg & (1 << 1)) { //richting encoder, meerdere types 
+				SW_encoder(true); //V3.00 richting encoder instelbaar
+			}
+			else {
+				SW_encoder(false); //V3.00 richting encoder instelbaar
+			}
 			break;
 		case 12:
 			ENC_count = 13;
@@ -1216,7 +1257,7 @@ void SW_on(byte sw) {
 		}
 		break;
 	case 10://Enc switch
-		MOTOR(); //toggle motor on/off
+		MOTOR(true,false); //toggle motor on/off
 		//PORTB ^= (1 << 1); //toggle enable poort
 		break;
 	case 11: //nc
@@ -1231,9 +1272,10 @@ void SW_0(boolean onoff) { //up
 			SW_encoder(true);
 			break;
 		case 1: //handmatig instellen
-			//dient alleen tjdens bouwen om de motor te kunnen laten draaien.
+			//dient alleen tijdens bouwen om de motor te kunnen laten draaien.
 			up;
-			start();
+			OCR2A = Vhome;
+			startmotor();
 			break;
 
 		case 2: //instellen etages
@@ -1256,7 +1298,8 @@ void SW_0(boolean onoff) { //up
 
 		case 4: //modes (MEM_reg instellingen)
 			PRG_level++;
-			if (PRG_level > 0)PRG_level = 0;
+			if (PRG_level > 1)PRG_level = 0;
+			DSP_exe(50);
 			break;
 		case 5:
 			SW_encoder(true);
@@ -1286,11 +1329,11 @@ void SW_1(boolean onoff) { //down
 		case 0:
 			SW_encoder(false);
 			break;
-		case 1: //handmatig
-			if (POS > 0) {
-				down;
-				start();
-			}
+		case 1: //handmatig			
+			down;
+			OCR2A = Vhome;
+			startmotor();
+
 			break;
 		case 2: //instellen stops
 			switch (PRG_level) {
@@ -1339,7 +1382,10 @@ void SW_1(boolean onoff) { //down
 void SW_2() {
 	switch (PRG_fase) {
 	case 0: //n bedrijf
-		MOTOR(); //toggled motor aan of uit. Ook vanuit setup...eenmalig 
+		MOTOR(true,false); //toggled motor aan of uit. Ook vanuit setup...eenmalig 
+		break;
+	case 1:
+		MOTOR(true,false);
 		break;
 	case 2: //instellen etages
 		PRG_level++;
@@ -1355,7 +1401,7 @@ void SW_2() {
 		EEPROM.update(104, DCC_mode);
 		EEPROM.update(116, toepassing);
 		COM_V();
-		OCR2A = Vhome;
+		OCR2A = Vhome;//????
 		PRG_fase = 0;
 		DSP_prg();
 		break;
@@ -1372,12 +1418,18 @@ void SW_2() {
 	}
 }
 void SW_3() {
-	if (~GPIOR0 & (1 << 5)) { //motor draait niet
+	if (~GPIOR0 & (1 << 5)) { //switch enabled, blocked als motor draait
 	//tijdens positie testen ff uit
 		PRG_fase++;
 		if (PRG_fase > 5)PRG_fase = 0;
 		DSP_prg();
 		PRG_level = 0;
+		if (PRG_fase > 0) {
+			free(); //Stel brug als bezet, groene led
+		}
+		else {			
+			MOTOR(false,false); //V3.00 herstart direct na aanpassingen
+		}
 	}
 }
 void ET_rq() {
@@ -1476,7 +1528,7 @@ void RUN_rq_M() { //called from et_rq (stops_rq==stopscurrent komt niet voor)
 void SW_encoder(boolean dir) {
 	switch (PRG_fase) {
 	case 0:
-		if (~GPIOR0 & (1 << 5)) { //als motor draait keuze nieuwe stop niet mogelijk
+		if (~GPIOR1 & (1 << 6)) { //als motor draait keuze nieuwe stop niet mogelijk
 			ENC_select(dir);
 			ET_rq();
 			DSP_exe(12);
@@ -1568,7 +1620,9 @@ void SW_encoder(boolean dir) {
 		DSP_exe(40);
 		break;
 	case 4: //mode instellen MEM_reg
-		MEM_reg ^= (1 << PRG_level); //0=positie met
+		MEM_reg ^= (1 << PRG_level);
+		//level1  true=melder-mode false=home-mode
+		//level2  Encoder richting
 		DSP_exe(50);
 		break;
 	case 5: //DCC (decoder)adres
@@ -1621,10 +1675,11 @@ void ENC_select(boolean dir) {
 	}
 }
 void loop() {
-	
+
 	DEK_DCCh();//tbv dekoder
 	slowcount++;//Counter voor langzame processen 1xin 255 cycli
-	if (slowcount == 0) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
+	if (slowcount > 100) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
+		slowcount = 0;
 		SW_read();
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
 		if (GPIOR1 & (1 << 1))SLOW(); //vertragen
