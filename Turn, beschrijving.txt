@@ -33,6 +33,9 @@ bit3 bij POS==POS_rq; als true stoppen, als false volgende POS_rq instellen
 bit4 Na noodstop in melder, brug NIET vrijgeven tot er een nieuwe stops is bereikt
 bit 5 sw_read pulsserend uitvoeren, telkens een pauze nemen, dus lees puls versmallen
 bit6 false switches enabled, true switches disabled, voorkomt draai request waar dat niet mag (tijdens draaien en noodstop)
+bit7 flag temp ISR naar display
+
+
 
 MEM_reg 
 bit0  Positie met  false=Home  true=melders (default)
