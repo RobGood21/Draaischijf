@@ -73,11 +73,14 @@ long POS_calc; //afrem positie
 
 //unsigned long stops[16]; //v3.0 unsigned
 
+
+
 struct stop
 {
 	long pos; //(melders)Afstand naar Volgende stop. (Home)stopplek
 	int width; //(melders)afstand tussen de twee melder edges
-	int fine; //afwijking middenount tussen edges
+	long fine;
+	//int16_t fine; //afwijking middenount tussen edges
 	byte reg; //register
 };
 //bit0=stop ingesteld(false) stop niet ingesteld(true)
@@ -86,6 +89,7 @@ struct stop stops[16]; //melder met adres 1 is stops[0]
 
 //byte setcount;
 //byte setstop; //welke stop is in het proces van bepalen, setten
+
 byte aantalStops;
 byte toepassing;
 byte lastup = 0;
@@ -161,6 +165,7 @@ void setup() {
 
 	DDRD |= (1 << 7); //set pins om switches uit te lezen voor de factory reset 
 	PORTD &= ~(1 << 7);
+
 	//Serial.println(PINC);
 	if (PINC == 54) {
 		cd;
@@ -171,6 +176,7 @@ void setup() {
 		FACTORY();
 		delay(500);
 	}
+
 	DDRD &= ~(B11100000); //Pins 7,6,5 as input
 	PORTD |= (B11110000); //pins 7,6,5 set pull-up
 
@@ -184,9 +190,10 @@ void setup() {
 	switchstatus[0] = 0xFF;
 	switchstatus[1] = 0xFF;
 	switchstatus[2] = 0xFF;
-
-
 	switchcount = 2; //zorgt ervoor dat eerst switchstatus 0 wordt getest, noodzakelijk, anders opstartproblemen
+
+
+
 	MEM_read();
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen	
@@ -605,10 +612,9 @@ ISR(TIMER2_COMPA_vect) {
 				switch (runfase) {
 				case 10:
 					stop();
-
 					if (PRG_fase == 2) {
 						//DSP_exe(16); //Serial.println(F("ISR"));
-						GPIOR1 |= (1 << 7); //set flag buiten ISR naar DSP_exe
+						GPIOR1 |= (1 << 7); //set flag buiten ISR naar DSP_exe(16)
 					}
 					else {
 						lock();
@@ -616,24 +622,35 @@ ISR(TIMER2_COMPA_vect) {
 					break;
 
 
-				case 20:
-					if (melderadres == 0) { //bereikt voor stop edge melder, dus te kort gedraait
-						runfase = 30;
-						//Serial.println(F("pos bereikt"));
+					/*
+								case 20:
+									//if (melderadres > 0)stop();
 
-					}
-					else { //bereikt NA stopedge melder, dus te ver gedraait
-						//Serial.println(F("Noodstop, te ver gedraait"));
-						stop();
-					}
-					break;
+
+									if (melderadres == 0) { //bereikt voor stop edge melder, dus te kort gedraait
+										//stop(); //test waar stopt de brug
+
+										//runfase = 30; //V3.00 instellen laatse traject edge melder naar eindpositie
+										//Serial.println(F("pos bereikt"));
+
+									}
+									else { //bereikt NA stopedge melder, dus te ver gedraait
+										//Serial.println(F("Noodstop, te ver gedraait"));
+										stop();
+									}
+
+
+
+									break;
+
+				*/
 				}
 
 			}
 			else { //home mode
 				stop();
 				PORTD |= (1 << 4); //lock bridge on
-				Serial.print(F("ISR POS ")); Serial.println(POS);
+				//Serial.print(F("ISR POS ")); Serial.println(POS);
 			}
 
 		}
@@ -655,13 +672,10 @@ void FAST() { //versnellen tijd gebaseerd
 	}
 }
 void SLOW() { //vertragen positie en tijd gebaseerd, called from loop 
-
 	//Serial.print(F("*"));
-
 	GPIOR1 &= ~(1 << 1); //reset bit thats calls SLOW()
 	GPIOR0 &= ~(1 << 4); //reset versnelling
 //aantal stappen berekenen met deze snelheid. 
-
 	if (OCR2A < Vmin) OCR2A++;
 	POS_acc = (accStep * 1000) / (puls*OCR2A);
 	//richting
@@ -671,17 +685,21 @@ void SLOW() { //vertragen positie en tijd gebaseerd, called from loop
 	else { ///going down
 		POS_calc = POS - POS_acc;
 	}
-	Serial.print(F("POS_rq= ")); Serial.print(POS_rq);
-	Serial.print(F("   POS :")); Serial.print(POS); Serial.print(F("  POS_calc :")); Serial.println(POS_calc);
+	//Serial.print(F("POS_rq= ")); Serial.print(POS_rq);Serial.print(F("   POS :")); Serial.print(POS); Serial.print(F("  POS_calc :")); Serial.println(POS_calc);
 
 }
 void FACTORY() {
 	//clears eeprom
 	//Serial.println(F("factory"));
-	for (byte i = 0; i < 500; i++) {
+
+	for (int i = 0; i < EEPROM.length(); i++) {
 		EEPROM.update(i, 0xFF);
-	}
+		//delay(1);
+	}	
 }
+
+
+
 void MEM_read() {
 	//instellingen voor een draaischijf zonder vertraging
 	//snelheden worden als 255-Vsnelheid getoond
@@ -713,14 +731,15 @@ void MEM_read() {
 
 	//terug laden postities 
 	for (byte i = 0; i < 16; i++) {
-		EEPROM.get(200 + (5 * i), stops[i].pos);
+		EEPROM.get(200 + (5 * i), stops[i].pos); //200
 		//EEPROM.get(300 + (5 + 1), stops[i].width);
-		EEPROM.get(400 + (5 + 1), stops[i].fine);
-		stops[i].reg = EEPROM.read(i + 1); //reg = register met 8 booleans
-		//bit0 posities bepaald
+		EEPROM.get(300 + (5 * i), stops[i].fine); //400
+		//stops[i].reg = EEPROM.read(i + 1); //reg = register met 8 booleans
+		//bit0 posities bepaald niet in EEPROM
 
 		if (MEM_reg & (1 << 0)) { //melder-mode
-
+			Serial.print(F("pos  ")); Serial.println(stops[i].pos);
+			Serial.print(F("fine  ")); Serial.println(stops[i].fine);
 		}
 		else { //home-mode
 			if (stops[i].pos == 0xFFFFFFFF) {
@@ -769,7 +788,7 @@ void DSP_exe(byte txt) {
 	case 12: //In bedrijf aanduiding
 		regelb; display.print(stp);
 		if (~GPIOR0 & (1 << 3)) { //motor uit
-			regelst; display.print(F("Stop"));
+			regelst; display.print(F("X"));
 		}
 		if (melderadres > 0) {
 			DSP_settxt(104, 5, 2);
@@ -792,9 +811,10 @@ void DSP_exe(byte txt) {
 
 	case 16: //instellen stops
 		regel1s; display.print(F("Instellen stops ")); display.print(stp);
-		regel2;
+		regel2;		//display.print(POS);
+		
 		if (MEM_reg & (1 << 0)) { //melder-mode
-			display.print(stops[stp].fine);
+			display.print(POS);
 		}
 		else { //home_mode
 			display.print(POS);
@@ -936,6 +956,7 @@ void DSP_prg() {
 
 		*/
 	case 2: //instellen stops
+
 		switch (PRG_level) {
 		case 0: //kiezen stops met knoppen of encoder
 			DSP_exe(15);
@@ -954,7 +975,6 @@ void DSP_prg() {
 				}
 				else { //Niet gelijk, geen actie
 					Serial.println(F("niet gelijk"));
-
 				}
 			}
 			else { //home-mode
@@ -964,16 +984,21 @@ void DSP_prg() {
 
 		case 2: //opslaan fine instelling stops
 			if (MEM_reg & (1 << 0)) { //melder-mode
+				stops[stops_current].fine = POS;
+				EEPROM.put(300 + (5 * stops_current), stops[stops_current].fine);				
+				//Serial.print(F("Fine: ")); Serial.println(stops[stops_current].fine);
 
 			}
 			else { //home-mode
-				PRG_level = 0;
-				DSP_exe(15);
+
 				stops[stops_rq].pos = POS;
 				//stops_status &= ~(1 << stops_rq);
 				EEPROM.put(200 + (5 * stops_rq), POS);
 				//EEPROM.update(100, stops_status);
 			}
+				PRG_level = 0;
+				DSP_exe(15);
+
 			break;
 		}
 		break;
@@ -1143,7 +1168,6 @@ void MA_changed() {
 					}
 					else {
 						if (stp == 0)stops_current = 1;
-
 						stops_rq = stp;
 					}
 					GPIOR0 &= ~(1 << 0); //stop zoeken
@@ -1155,19 +1179,22 @@ void MA_changed() {
 		}
 		break;
 
-	case 30:
-		//gedraait voor melder, melder nu bereikt. 
-		//stops_rq moet bekend zijn...
-		POS_rq = stops[stops_rq].width / 2;
-		if (GPIOR0 & (1 << 1)) {//updraaien
-			POS = 0;
+	case 20:  //was 30 called from ISR2
+		if (melderadres - 1 == stops_rq) {
+			//gedraaid edge aankomst melder nu bereikt. 
+			//stops_rq moet bekend zijn...
+			POS_rq = stops[stops_rq].width / 2;
+			if (GPIOR0 & (1 << 1)) {//updraaien
+				POS = 0;
+			}
+			else {//down draaien
+				POS = POS_rq;
+				POS_rq = 0;
+			}
+			RUN_rq();
+			runfase = 10;
 		}
-		else {//down draaien
-			POS = POS_rq;
-			POS_rq = 0;
-		}
-		RUN_rq();
-		runfase = 10;
+
 		break;
 
 
@@ -1194,21 +1221,25 @@ void MA_changed() {
 	}
 }
 void F_width(byte stp) { //breedte van een melder bepaald
-	//Serial.println(F("F_width"));
+
+	Serial.print(F("F_width POS:  ")); Serial.println(POS);
+
 	stops[stp].reg &= ~(1 << 1);
 	stops[stp].width = abs(POS); //altijd een positieve waarde
 
 	if (stp == stops_rq) {
 		stop();
-		//hier is van de stops_rq melder de width bekend
+		//hier is van de stops_rq melder de width bekend	
+
 		if (POS > 0) {
-			POS_rq = POS - stops[stp].width / 2;
-			//POS_rq = calcPos(stp,true);
+			//POS_rq = POS - stops[stp].width / 2;
+			POS_rq = calcPos(stp, true);
 		}
 		else {
-			POS_rq = POS + stops[stp].width / 2;
-			//POS_rq = calcPos(stp,false);
+			//POS_rq = POS + stops[stp].width / 2;
+			POS_rq = calcPos(stp, false);
 		}
+
 
 		//Serial.println(POS_rq);
 		RUN_rq();
@@ -1222,20 +1253,14 @@ void F_width(byte stp) { //breedte van een melder bepaald
 	}
 }
 
-
 long calcPos(byte stp, boolean updown) {
-
-	long result = 0;
+	POS = 0; //positie weer op nul stellen, nieuw pos request berekenen tov pos=0
+	long result = (stops[stp].width / 2) - stops[stp].fine;
 	if (updown) {
-		POS + stops[stp].width / 2;
-	}
-	else {
-		POS - stops[stp].width / 2;
+		result = result * -1;
 	}
 	return result;
 }
-
-
 void F_pos(byte stp) {
 	stops[stp].reg &= ~(1 << 2);
 	stops[stp].pos = abs(POS); // Altijd positief waarde
@@ -1272,9 +1297,6 @@ void SW_off(byte sw) {
 			else {
 				SW_encoder(true); //V3.00 richting encoder instelbaar
 			}
-
-
-
 			break;
 		default:
 			ENC_count = 0;
@@ -1508,6 +1530,7 @@ void SW_1(boolean onoff) { //down
 	}
 }
 void SW_2() {
+	//Altijd SW2 ON (ingedrukt)
 	switch (PRG_fase) {
 	case 0: //n bedrijf
 		MOTOR(true, false); //toggled motor aan of uit. Ook vanuit setup...eenmalig 
@@ -1516,18 +1539,14 @@ void SW_2() {
 		MOTOR(true, false);
 		break;
 	case 2: //instellen etages
-		if (MEM_reg & (1 << 0)) { //melder-mode
-			if (runfase > 0) { //tijdens opzoeken edges om NOODSTOP mogelijk te maken.
-				MOTOR(true, false);
-			}
-			else {
-
-			}
-		}
-		else { //home-mode
-			PRG_level++;
-			DSP_prg();
-		}
+		//if (MEM_reg & (1 << 0)) { //melder-mode
+		//if (runfase > 0) { //tijdens opzoeken edges om NOODSTOP mogelijk te maken.
+		//	MOTOR(true, false); //toggle motor aan of uit, Noodstop
+		//	return; //verlaat void
+		//}
+		//Serial.println("j");
+		PRG_level++;
+		DSP_prg();
 		break;
 
 	case 3: //instellen snelheden en diverse (waardes) instellingen 
@@ -1614,40 +1633,44 @@ void RUN_rq() {
 }
 void RUN_rq_M() { //called from et_rq (stops_rq==stopscurrent komt niet voor)
 	boolean bekend = true;
+	byte vertrek; byte aankomst;
 	runfase = 0;
 	//stops_rq=waar die naar toe moet, stop_current staat tie in
 	POS = 0; //zet huidige positie op 0
-	long dist = stops[stops_current].width / 2; //van middenpunt naar melder(.fine moet hier nog bij komen)
+	//Route berekening van middenpunt vertrekkende melder naar edge van aankomst melder.
+	long dist = 0; //= stops[stops_current].width 2; //middelpunt vertrekkende melder meerekenen
+	//Gebleken is dat het meenemen van de volledige breedte van de vertrekkende melder er mooier uitziet.
 	//kijken of route bekend is
 	if (stops_rq > stops_current) {
-		up; //vreemde plek alleen functioneel als bekend false blijkt te zijn, scheelt een if statement
-		for (byte i = stops_current; i < stops_rq; i++) { //alle route delen moeten bekend zijn.
-			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naat bovenstop (niet) bekend			
-			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder bekend
-			if (stops[i + 1].reg & (1 << 1))bekend = false;
-
-			dist = dist + stops[i].pos;
-			if (i != stops_current) dist = dist + stops[i].width;
-		}
+		up; // functioneel voor als bekend false blijkt te zijn, scheelt een if statement verderop (testen richting)
+		aankomst = stops_rq;
+		vertrek = stops_current;
 	}
 	else { //rq<current
 		down; //zie up
-		for (byte i = stops_rq; i < stops_current; i++) { //alle route delen moeten bekend zijn.
-			if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naar bovenstop (niet) bekend
-			if (stops[i].reg & (1 << 1))bekend = false; //breedte melder (niet) bekend aankomst stop
-			if (stops[i + 1].reg & (1 << 1))bekend = false; //breedte melder bekend vertrek stop
-
-			dist = dist + stops[i].pos;
-			if (i != stops_rq) dist = dist + stops[i].width;
-		}
+		aankomst = stops_current;
+		vertrek = stops_rq;
 	}
 
+	for (byte i = vertrek; i < aankomst; i++) { //alle route delen moeten bekend zijn.
+		if (stops[i].reg & (1 << 2))bekend = false; //afstand tussen onderstop naar bovenstop (niet) bekend
+		if (stops[i].reg & (1 << 1))bekend = false; //breedte melder (niet) bekend aankomst stop
+		if (stops[i + 1].reg & (1 << 1))bekend = false; //breedte melder bekend vertrek stop
+		dist = dist + stops[i].pos;
+		dist = dist + stops[i].width; //breedte van de melder, ook vertrekkende melder breedte meegerekend
+		//if (i != stops_rq) dist = dist + stops[i].width;  //breedte vertrekkende melder uitsluiten
+	}
+	/*
+	Afstand is berekend van (middenpunt) vertrekkende melder tot edge aankomst melder. Daarna draait brug door in Vmin totdat
+	de edge van de aankomst melder actief wordt. Pos wordt dan weer 0 gezet (in F_width) en de afstand van de edge tot het juiste stoppunt
+	wordt berekend en daarna naar toe gedraait.
+	Deze eerste draai is een ongeveer draai. Blokkade of slippen van de brug heeft hierdoor geen invloed op stopplek, draaien
+	gaat door totdat de aankomst melder actief wordt.
+	*/
+
 	if (bekend) {
-
-		runfase = 20;//20??
+		runfase = 20; //zie MA_changed()
 		//Serial.print(F("bekend"));
-		//GPIOR1 |= (1 << 3); //melders uitschakelen, tempie
-
 		if (GPIOR0 & (1 << 1)) { //richting up
 			POS = 0;
 			POS_rq = dist;
@@ -1827,8 +1850,8 @@ void loop() {
 
 	DEK_DCCh();//tbv dekoder
 	slowcount++;//Counter voor langzame processen 1xin 255 cycli
-	if (slowcount == 0) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
-		//slowcount = 0;
+	if (slowcount > 100) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
+		slowcount = 0;
 
 
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
@@ -1843,7 +1866,9 @@ void loop() {
 
 		if (GPIOR1 & (1 << 7)) {
 			GPIOR1 &= ~(1 << 7); //reset flag
-			DSP_exe(16);
+			//POS = 0; //nieuwe begin positie om fine te kunnen meten
+			POS = stops[stops_current].fine;
+			DSP_exe(16); //instellen fine stops, toont stops[].fine
 		}
 		//Volgorde in LOOP is hier belangrijk, SW_read onderaan....
 		SW_read();

@@ -50,9 +50,9 @@ EEPROM
 103 DCC decoder adres, default=0xFF;
 104 DCC_mode
 1~20 struct stops[].set 
-200> struct stops[].downpos
-300>struct stops[].uppos
-400>struct stops[].finepos
+200> struct stops[].pos 
+   300>struct stops[].width **niet in EEprom
+400>struct stops[].fine
 
 
 110 Vhome
