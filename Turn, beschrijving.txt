@@ -31,9 +31,12 @@ bit1 in Loop call and reset in SLOW(), set in ISR timer 2
 bit2 Bij opstarten (setup) en sw_melderadres, flag als true eerst een change in melderstatus, daarna motor()
 bit3 bij POS==POS_rq; als true stoppen, als false volgende POS_rq instellen
 bit4 Na noodstop in melder, brug NIET vrijgeven tot er een nieuwe stops is bereikt
-bit 5 sw_read pulsserend uitvoeren, telkens een pauze nemen, dus lees puls versmallen
+bit 5 sw_read pulserend uitvoeren, telkens een pauze nemen, dus lees puls versmallen
 bit6 false switches enabled, true switches disabled, voorkomt draai request waar dat niet mag (tijdens draaien en noodstop)
 bit7 flag temp ISR naar display
+
+GPIOR2
+
 
 
 
@@ -41,6 +44,7 @@ MEM_reg
 bit0  Positie met  false=Home  true=melders (default)
 bit1 als in melders, posities bepaald=false; posities nog te bepalen=true ??????Waarschijnlijk niet in gebruik
 bit2 Type encoder richting 
+bit3 Motor off true motor stroomloos als lock is
 
 
 EEPROM
@@ -49,10 +53,9 @@ EEPROM
 102 MEM_reg, let op default = 0xFF
 103 DCC decoder adres, default=0xFF;
 104 DCC_mode
-1~20 struct stops[].set 
+       1~20 struct stops[].set ???????? volgens mij niet
 200> struct stops[].pos 
-   300>struct stops[].width **niet in EEprom
-400>struct stops[].fine
+300> struct stops[].fine
 
 
 110 Vhome
@@ -61,8 +64,9 @@ EEPROM
 113 Vstep waardes 0~3 (shows 1-4)
 114 aantalStops
 115 Vaccel
+116 Toepassing 0=draaischijf 1=rolbrug 2=lift
+117 Speling max 254 default 0
 
-120 Toepassing 0=draaischijf 1=rolbrug 2=lift
 
 stops[].reg register van struct stop
 bit0 Melder volledig opgeslagen
