@@ -33,18 +33,19 @@ bit3 bij POS==POS_rq; als true stoppen, als false volgende POS_rq instellen
 bit4 Na noodstop in melder, brug NIET vrijgeven tot er een nieuwe stops is bereikt
 bit 5 sw_read pulserend uitvoeren, telkens een pauze nemen, dus lees puls versmallen
 bit6 false switches enabled, true switches disabled, voorkomt draai request waar dat niet mag (tijdens draaien en noodstop)
-bit7 flag temp ISR naar display
+bit7 flag temp ISR naar display (Minimaal code uitvoeren in ISR)
 
 GPIOR2
-
+bit 0 flag in ISR2 als set naar lock (om minimaal code in ISR uit te voeren)
+bit 1 Noodstop true aan, alles uit grendel los, false uit 
+bit 2 Timer voor motor uit in lock(). true=timer in gebruik false= timer vrij timer runwait wordt dubbel gebruikt ook in et_rq()
 
 
 
 MEM_reg 
 bit0  Positie met  false=Home  true=melders (default)
-bit1 als in melders, posities bepaald=false; posities nog te bepalen=true ??????Waarschijnlijk niet in gebruik
-bit2 Type encoder richting 
-bit3 Motor off true motor stroomloos als lock is
+bit1 Type encoder richting 
+bit2 Motor off false motor stroomloos als stop is bereikt. True is motor altijd aan laten (default)
 
 
 EEPROM

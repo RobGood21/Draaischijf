@@ -184,7 +184,7 @@ void setup() {
 		GPIOR1 |= (1 << 2); //flag voor one-shot, anders wordt MOTOR() in iedere loop cycle getest.
 	}
 	else { //home mode, testen melderadres nu niet nodig.
-		MOTOR(true, false);
+		MOTOR(true);
 	}
 }
 
@@ -490,7 +490,7 @@ void start() {
 	}
 }
 void startmotor() {
-	PORTB &= ~(1 << 1); //enable motor, ENA van driver 
+	//PORTB &= ~(1 << 1); //enable motor, ENA van driver 
 	TCCR2B |= (1 << 3); //enable interrupt prescaler 
 	TIMSK2 |= (1 << 1); //enable interupt 
 	GPIOR0 |= (1 << 5); //flag true motor draait, false motor staat stil
@@ -508,26 +508,34 @@ void stop() {
 	PORTB &= ~(1 << 0); //Run led uit
 	EIMSK |= (1 << INT0); //enable DCC receive, ontvangst DCC mogelijk
 }
-void MOTOR(boolean toggle, boolean offon) {
+void noodstop() {
+	//Noodstop, schakelt motor uit, haalt vergrendeling los
+	GPIOR2 ^= (1 << 1); //Toggle noodstop aan of uit
+	MOTOR(~GPIOR2 & (1 << 1));
+}
+
+void MOTOR(boolean offon) {
 	//Serial.println(F("Motor"));
 	//schakelt NOODSTOP in of uit en regelt dat alles goed opstart na een noodstop.
-	if (toggle) {
-		GPIOR0 ^= (1 << 3); //Motor aan of uit 
+	//if (toggle) {
+		//GPIOR0 ^= (1 << 3); //Motor aan of uit 
+	//}
+	//else {
+	if (offon) {
+		GPIOR0 |= (1 << 3); //on
 	}
 	else {
-		if (offon) {
-			GPIOR0 |= (1 << 3); //on
-		}
-		else {
-			GPIOR0 &= ~(1 << 3); //off
-		}
+		GPIOR0 &= ~(1 << 3); //off
 	}
+	//}
 
 	if (~GPIOR0 & (1 << 3)) { //Motor uit
 		PORTB |= (1 << 1); //disable motor, ENA van motor driver
+		PORTD &= ~(1 << 4); //lock, vergrendeling los maken
 		stop();
 		DSP_exe(20);
 		GPIOR1 |= (1 << 6); //disable switches 
+
 	}
 	else {
 		PORTB &= ~(1 << 1); //enable motor, ENA laag van de motordriver
@@ -586,12 +594,15 @@ ISR(TIMER2_COMPA_vect) {
 				case 10:
 					//Laatste deel gedraaid stop bereikt
 					stop();
+
+					//Onderstaande constructie is nog omdat de timerinterrupt erg snel gaat, en er minimaal 
+					//code in de ISR moet worden uitgevoerd. Dit verplaatst de acties naar Loop()
 					if (PRG_fase == 2) {
 						//DSP_exe(16); //
 						GPIOR1 |= (1 << 7); //set flag buiten ISR naar DSP_exe(16)
 					}
 					else {
-						lock();
+						GPIOR2 |= (1 << 0); //zet flag, activeert Lock() in Loop						
 					}
 					break;
 				}
@@ -650,7 +661,7 @@ void MEM_read() {
 	//snelheden worden als 255-Vsnelheid getoond
 
 	MEM_reg = EEPROM.read(102);
-
+	Serial.print(F("MEM_reg: ")); Serial.println(MEM_reg, BIN);
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 50;
 	Vmin = EEPROM.read(111);
@@ -728,6 +739,7 @@ void DSP_exe(byte txt) {
 	case 10:
 		regelst; display.print(F("Positie zoeken...."));
 		break;
+
 	case 12: //In bedrijf aanduiding
 		regelb; display.print(stp);
 		if (~GPIOR0 & (1 << 3)) { //motor uit
@@ -738,6 +750,7 @@ void DSP_exe(byte txt) {
 			display.print(melderadres);
 		}
 		break;
+
 	case 15://keuze in te stellen stops
 		regel1s; display.print(F("stops instellen "));
 		regel2;
@@ -882,7 +895,7 @@ void DSP_exe(byte txt) {
 void DSP_prg() {
 	switch (PRG_fase) {
 	case 0: //in bedrijf
-		MOTOR(false, false);
+		MOTOR(false);
 		//DSP_exe(21); //12
 		break;
 
@@ -1073,7 +1086,7 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 
 	if (GPIOR1 & (1 << 2)) { //set in setup
 		GPIOR1 &= ~(1 << 2);
-		MOTOR(true, false);
+		MOTOR(true);
 	}
 
 
@@ -1205,18 +1218,18 @@ void F_width(byte stp, boolean splng) { //breedte van een melder bepaald
 		//if (POS >= 0) {
 
 		if (GPIOR0 & (1 << 1)) { //draait up
-			Serial.println(">");
+			//Serial.println(">");
 			POS_rq = calcPos(stp, true);
 			if (splng)POS_rq = POS_rq - speling;
 		}
 		else {
 			POS_rq = calcPos(stp, false);
-			Serial.println("<");
+			//Serial.println("<");
 			if (splng)POS_rq = POS_rq + speling;
 		}
 
 
-		Serial.print(F("F_width POS_rq= ")); Serial.println(POS_rq);
+		//Serial.print(F("F_width POS_rq= ")); Serial.println(POS_rq);
 		RUN_rq();
 		runfase = 10;
 		//monitor();
@@ -1367,7 +1380,8 @@ void SW_on(byte sw) {
 		}
 		break;
 	case 10://Enc switch
-		MOTOR(true, false); //toggle motor on/off
+		noodstop();
+		//MOTOR(true, false); //toggle motor on/off
 		//PORTB ^= (1 << 1); //toggle enable poort
 		break;
 	case 11: //nc
@@ -1510,10 +1524,12 @@ void SW_2() {
 	//Altijd SW2 ON (ingedrukt)
 	switch (PRG_fase) {
 	case 0: //n bedrijf
-		MOTOR(true, false); //toggled motor aan of uit. Ook vanuit setup...eenmalig 
+		noodstop();
+		//MOTOR(true, false); //toggled motor aan of uit. Ook vanuit setup...eenmalig 
 		break;
 	case 1:
-		MOTOR(true, false);
+		noodstop();
+		//MOTOR(true, false);
 		break;
 	case 2: //instellen etages
 		//if (MEM_reg & (1 << 0)) { //melder-mode
@@ -1566,12 +1582,14 @@ void SW_3() {
 			free(); //Stel brug als bezet, groene led uit
 		}
 		else {
-			MOTOR(false, true); //V3.00 herstart direct na aanpassingen
+			MOTOR(true); //V3.00 herstart direct na aanpassingen
 		}
 	}
 }
 void ET_rq() {
-	PORTD &= ~(1 << 4); //free lock at new position request
+	//PORTD &= ~(1 << 4); //free lock at new position request
+	free(); //V3.00
+
 	if (~COM_reg & (1 << 0)) {
 		COM_reg |= ((1 << 0));
 		runwait = millis();
@@ -1793,20 +1811,41 @@ void SW_encoder(boolean dir) {
 	}
 }
 void lock() {
+	Serial.println(F("Lock"));
 	//doet alles om de brug te vergrendelen en vrij te geven voor een nieuwe draaiopdracht gebruik
 	//voorlopig alleen groene ledje op PIN4
 	//issue na noodstop BINNEN een melder mag brug niet vrij worden gegeven
 	//eventueel automatisch verplaatsen? kan hier ook maar voorlopig alleen led niet vrijgeven
 	stops_current = melderadres - 1;
-
 	//Na een noodstop wordt bit4 van GPIOR1 gezet zodat Niet de brug wordt vergrendelt.
-	if (~GPIOR1 & (1 << 4)) PORTD |= (1 << 4); //lock bridge on, NOT after noodstop
+
+
+	//dit lijkt me niet juist, heeft meer aandacht nodig
+	// vergrendeling en vrijgeven alleen als zeker is dat juiste positie is bereikt.
+	//na noodstop of opstarten in een stop is dat niet gegarandeerd
+	//bij opstarten in een station is dus misschien een opstart procedure nodig,
+	//twee keer edge draaien en stoppunt zoeken en daarna grendel derop.
+	if (~GPIOR1 & (1 << 4)) PORTD |= (1 << 4); //lock bridge on, NOT after noodstop, 
+	//of power-up in een station, dus geen draai gemaakt.
+	//vergrendeling moet dan niks doen, niet vergrendelen en niet vrij maken. 
+	//hier moeten we nog iets voor verzinnen. Zo ist niet goed genoeg...
+	//eerst grendel maken 
+
 	GPIOR1 &= ~(1 << 4); //reset noodstop flag
 
+
 	runfase = 0;
+
+	if (~MEM_reg & (1 << 2)) { //motor uit in stop
+		//Serial.println(F("uit"));
+		GPIOR2 |= (1 << 2); //zet timer aan, timer zet motor uit na 2 seconde in Loop()
+		runwait = millis();
+	}
 }
 void free() {
 	//Maakt de brug vrij om te kunnen draaien
+	GPIOR0 |= (1 << 3);// flag voor motor enabled
+	PORTB &= ~(1 << 1);// enable motor
 	PORTD &= ~(1 << 4); //groene led, lock low
 
 }
@@ -1852,12 +1891,31 @@ void loop() {
 			if (COM_reg & (1 << 0))ET_rq();
 		}
 
+
+		//Acties uit ISR2 TIMER 
 		if (GPIOR1 & (1 << 7)) {
 			GPIOR1 &= ~(1 << 7); //reset flag
 			//POS = 0; //nieuwe begin positie om fine te kunnen meten
 			POS = stops[stops_current].fine;
 			DSP_exe(16); //instellen fine stops, toont stops[].fine
 		}
+
+		if (GPIOR2 & (1 << 0)) {
+			GPIOR2 &= ~(1 << 0); //reset flag
+			lock(); //
+		}
+
+		//timer  voor uitschakelen motor in lock na periode  OPM.runwait wordt ook in et_rq() gebruikt
+		if (GPIOR2 & (1 << 2)) {		
+			if (millis() - runwait > 2000) { //timer 2 seconden
+				GPIOR2 &= ~(1 << 2);
+				GPIOR0 &= ~(1 << 3); //Motor enabled flag clear
+				PORTB |= (1 << 1); //disable motor
+				DSP_exe(12);
+			}
+		}
+
+
 		//Volgorde in LOOP is hier belangrijk, SW_read onderaan....
 		SW_read();
 	}
