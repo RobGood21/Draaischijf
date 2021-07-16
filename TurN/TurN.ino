@@ -401,31 +401,42 @@ void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
 	//Als motor draait geen DCC ontvangst. Start() disables DCC Stop() enables DCC (EIMKS masks register)
 	//Filter, alleen er toe doende commandoos doorlaten, als motor draait geen DCC ontvangst
-	int ad;
-	ad = (decoder - DCC_adres) * 4 + channel; //adressen omgezet in 0~16
-	switch (DCC_mode) {
-	case 0: //Single alleen true port schakeld stops
-		if (ad < aantalStops) {
+	unsigned int ad = 0; byte stop = 0;
+	ad = decoder - DCC_adres;
+	if (ad >= 0 && ad < 4 && type == false) {
+		ad = ad * 4 + channel;
+
+		//Serial.print(ad);
+
+		switch (DCC_mode) {
+		case 0: //Single alleen true port schakeld stops
 			if (port == true) {
-				stops_rq = ad - 1;
-				ET_rq();
-				DSP_exe(12);
+				stop = ad;
 			}
+			break;
+
+		case 1: //DUO-RA true schakeld stop false schakeld stop+1
+			if (port == true) {
+				stop = ad * 2 - 1;
+			}
+			else { //port =false
+				stop = ad * 2;
+			}
+			break;
+
+		case 2: //DUO-AR  afslaan-rechtdoor
+			if (port == false) {
+				stop = ad * 2 - 1;
+			}
+			else { //port =true
+				stop = ad * 2;
+			}
+			break;
+
 		}
-		break;
-	case 1: //DUO-RA true schakeld stop false schakeld stop+1
-		if (port == true) {
-			ad = ((ad * 2) - 1) - 1;
-		}
-		else { //port =false
-			ad = ((ad * 2)) - 1;
-		}
-		if (ad < aantalStops) {
-			stops_rq = ad;
-			ET_rq();
-			DSP_exe(12);
-		}
-		break;
+
+	}
+	/*
 	case 2: //DUO AR true schakeled stops+1, false schakeld stops
 		if (port == false) {
 			ad = ((ad * 2) - 1) - 1;
@@ -443,6 +454,17 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	case 3://Draai15 mode
 
 		break;
+	}
+
+	*/
+
+	//stop request maken
+	
+	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops) {
+        Serial.print(stop);
+		stops_rq = stop - 1;
+		ET_rq();
+		DSP_exe(12);
 	}
 }
 //**End void's for DeKoder
@@ -661,7 +683,7 @@ void MEM_read() {
 	//snelheden worden als 255-Vsnelheid getoond
 
 	MEM_reg = EEPROM.read(102);
-	Serial.print(F("MEM_reg: ")); Serial.println(MEM_reg, BIN);
+	//Serial.print(F("MEM_reg: ")); Serial.println(MEM_reg, BIN);
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 50;
 	Vmin = EEPROM.read(111);
@@ -895,7 +917,9 @@ void DSP_exe(byte txt) {
 void DSP_prg() {
 	switch (PRG_fase) {
 	case 0: //in bedrijf
-		MOTOR(false);
+		noodstop(); //aanpassing 16/7/2021
+
+		//MOTOR(false);
 		//DSP_exe(21); //12
 		break;
 
@@ -970,6 +994,7 @@ void DSP_prg() {
 
 	case 3: //Vmax
 		DSP_exe(40);
+
 		break;
 	case 4: //diverse instellingen
 		DSP_exe(50);
@@ -1162,7 +1187,7 @@ void MA_changed() {
 				POS_rq = 0;
 			}
 
-			Serial.print(F("MA_changed 20 POS_rq= ")); Serial.println(POS_rq);
+			//Serial.print(F("MA_changed 20 POS_rq= ")); Serial.println(POS_rq);
 			RUN_rq();
 			runfase = 10;
 		}
@@ -1554,6 +1579,7 @@ void SW_2() {
 		EEPROM.update(117, speling);
 		COM_V();
 		OCR2A = Vhome;//????
+
 		PRG_fase = 0;
 		DSP_prg();
 		break;
@@ -1811,7 +1837,7 @@ void SW_encoder(boolean dir) {
 	}
 }
 void lock() {
-	Serial.println(F("Lock"));
+	//Serial.println(F("Lock"));
 	//doet alles om de brug te vergrendelen en vrij te geven voor een nieuwe draaiopdracht gebruik
 	//voorlopig alleen groene ledje op PIN4
 	//issue na noodstop BINNEN een melder mag brug niet vrij worden gegeven
@@ -1906,7 +1932,7 @@ void loop() {
 		}
 
 		//timer  voor uitschakelen motor in lock na periode  OPM.runwait wordt ook in et_rq() gebruikt
-		if (GPIOR2 & (1 << 2)) {		
+		if (GPIOR2 & (1 << 2)) {
 			if (millis() - runwait > 2000) { //timer 2 seconden
 				GPIOR2 &= ~(1 << 2);
 				GPIOR0 &= ~(1 << 3); //Motor enabled flag clear
