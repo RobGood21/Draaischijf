@@ -85,7 +85,7 @@ struct stop stops[16]; //melder met adres 1 is stops[0]
 //byte setstop; //welke stop is in het proces van bepalen, setten
 
 byte aantalStops;
-byte toepassing;
+//byte toepassing;
 byte lastup = 0;
 byte lastdown = 0;
 byte stops_rq;
@@ -699,8 +699,8 @@ void MEM_read() {
 	Vaccel = EEPROM.read(115);
 	if (Vaccel > 10)Vaccel = 8;
 
-	toepassing = EEPROM.read(116); //0==draaischijf, 1=rolbrug 2=lift
-	if (toepassing > 2)toepassing = 0;
+	//toepassing = EEPROM.read(116); //0==draaischijf, 1=rolbrug 2=lift
+	//if (toepassing > 2)toepassing = 0;
 
 	speling = EEPROM.read(117);
 	if (speling > 254)speling = 10; //default speling, vrije slag in de aandrijving
@@ -828,22 +828,7 @@ void DSP_exe(byte txt) {
 			regel2;
 			display.print(F("Stops: ")); display.print(aantalStops);
 			break;
-		case 6: //toepassing instellen, volgens mij overbodig??? misschien soort van presets ervan maken?
-			regel2;
-			switch (toepassing) {
-			case 0:
-				display.print(F("Schijf"));
-				break;
-			case 1:
-				display.print(F("Rolbrug"));
-				break;
-			case 2:
-				display.print(F("Lift"));
-				break;
-			}
-			break;
-
-		case 7:
+		case 6:
 			display.print(F(" DCC: ")); regel2;
 			switch (DCC_mode) {
 			case 0:
@@ -860,7 +845,7 @@ void DSP_exe(byte txt) {
 				break;
 			}
 			break;
-		case 8: //Speling vrije slag, slip,
+		case 7: //Speling vrije slag, slip,
 			display.print(F(" speling")); regel2;
 			display.print(speling);
 			break;
@@ -1449,7 +1434,7 @@ void SW_0(boolean onoff) { //up
 
 		case 3: //Instellingen met byte waardes
 			PRG_level++;
-			if (PRG_level > 8)PRG_level = 0;
+			if (PRG_level > 7)PRG_level = 0;
 			DSP_exe(40);
 			break;
 
@@ -1575,7 +1560,7 @@ void SW_2() {
 		EEPROM.update(114, aantalStops);
 		EEPROM.update(115, Vaccel);
 		EEPROM.update(104, DCC_mode);
-		EEPROM.update(116, toepassing);
+		//EEPROM.update(116, toepassing);
 		EEPROM.update(117, speling);
 		COM_V();
 		OCR2A = Vhome;//????
@@ -1766,15 +1751,11 @@ void SW_encoder(boolean dir) {
 				aantalStops--;
 				if (aantalStops < 1) aantalStops = 16;
 				break;
-			case 6: //toepassingen
-				toepassing--;
-				if (toepassing > 2)toepassing = 2;
-				break;
-			case 7: //DCC modi
+			case 6: //DCC modi
 				DCC_mode--;
 				if (DCC_mode > 3)DCC_mode = 3;
 				break;
-			case 8:
+			case 7:
 				if (speling > 0)speling--;
 				break;
 			}
@@ -1802,15 +1783,11 @@ void SW_encoder(boolean dir) {
 				aantalStops++;
 				if (aantalStops > 16)aantalStops = 1;
 				break;
-			case 6://Toepassing
-				toepassing++;
-				if (toepassing > 2)toepassing = 0;
-				break;
-			case 7: //DCC modi
+			case 6: //DCC modi
 				DCC_mode++;
 				if (DCC_mode > 3)DCC_mode = 0;
 				break;
-			case 8: //speling, vrije slag
+			case 7: //speling, vrije slag
 				if (speling < 254)speling++;
 				break;
 			}
