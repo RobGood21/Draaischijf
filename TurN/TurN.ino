@@ -59,6 +59,9 @@ byte DEK_Buf4[4];
 byte DEK_Buf5[4];
 //**End declaration for deKoder
 
+int uniek = 0;
+
+
 byte DCC_adres;
 byte DCC_mode; //EEPROM 
 byte COM_reg;
@@ -106,6 +109,12 @@ byte count;
 byte startcount;
 byte speling;//speling of vrije slag in de aandrijving max 255
 
+byte draai15;
+byte dr15pos; //current position in draai15
+byte dr15ads; //draai15 aantal tegenover liggende sporen (koploper, Itrain)
+
+
+
 unsigned long runwait;
 byte Vaccel = 3; //ingestelde acceleratietijd in seconden
 float accStep; //berekende tijd per snelheids step in microsec
@@ -116,9 +125,10 @@ byte runfase;
 void setup() {
 	Serial.begin(9600);
 	//clear hardware registers 
-	GPIOR0 = 0;
-	GPIOR1 = 0;
-	GPIOR2 = 0;
+	GPIOR0 = 0x00;
+	GPIOR1 = 0x00;
+	GPIOR2 = 0x00;
+
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 	/*
 	Dit display is 128x64 pixels. Een pixel kan aan of uit zijn.
@@ -172,10 +182,15 @@ void setup() {
 	OCR2A = 255; //snelheid
 	//init
 
+	stops_rq = 0;
+	//dr15pos = 1;
+
 	switchstatus[0] = 0xFF;
 	switchstatus[1] = 0xFF;
 	switchstatus[2] = 0xFF;
 	switchcount = 2; //Eerst geteste switchcount nu 0 (switches) 
+
+
 	MEM_read();
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen
@@ -391,17 +406,29 @@ void DEK_DCCh() { //handles incoming DCC commands, called from loop()
 	if (n > 6)n = 0;
 }
 void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
-	int adres;
+	int adres; int unq;
+
+	unq = type ^ decoder^channel^port^onoff;
+
+
 	adres = ((decoder - 1) * 4) + channel;
 	//Applications 
 	//APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
+
+
+	//if (uniek != unq) { //alleen uniek nieuwe commands doorlaten
 	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
+	//	uniek = unq;
+	//}
+
 	//Add a void like APP_monitor for application
 }
 void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
 	//Als motor draait geen DCC ontvangst. Start() disables DCC Stop() enables DCC (EIMKS masks register)
 	//Filter, alleen er toe doende commandoos doorlaten, als motor draait geen DCC ontvangst
+
 	unsigned int ad = 0; byte stop = 0;
+	// byte dr15;
 	ad = decoder - DCC_adres;
 	if (ad >= 0 && ad < 4 && type == false) {
 		ad = ad * 4 + channel;
@@ -433,41 +460,88 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 			}
 			break;
 
-		}
+		case 3://Draai15 mode
+			//dr15 = POS_rq + 1; //huidige stop ophalen BELANGRIJK????
+			 //1 decoderadres nodig dus:
+			if (decoder == DCC_adres && onoff) {
+				//adressen. 
+				//reset=1 r(echtdoor) 1=2r 2=2a(fslaan) 4=3r 8=3a
+				//start=4r en 4a
+				switch (ad) {
+				case 1:
+					draai15 = 0;
+					break;
 
+				case 2:
+					if (port) {
+						draai15 |= (1 << 0);
+					}
+					else {
+						draai15 |= (1 << 1);
+					}
+					break;
+
+				case 3:
+					if (port) {
+						draai15 |= (1 << 2);
+					}
+					else {
+						draai15 |= (1 << 3);
+					}
+					break;
+
+				case 4:
+
+					if (draai15 == dr15pos) {
+						Serial.print("+");
+
+						if (GPIOR2 & (1 << 4)) { //flag enable 180
+							Serial.print("/");
+							GPIOR2 ^= (1 << 3); //set direct to counter track
+							GPIOR2 &= ~(1 << 4); //disable 180
+							stop = dr15();
+						}
+					}
+					else {
+						if (port) { //omhoog
+							if (draai15 < dr15pos) { //wisseld tussen direct en tegenoverliggend
+								GPIOR2 ^= (1 << 3);
+							}
+						}
+						else { //omlaag
+							if (draai15 > dr15pos) { //wisseld tusen direct en tegenover
+								GPIOR2 ^= (1 << 3);
+							}
+						}
+						stop = dr15();					}//draai15==dr15pos
+					dr15pos = draai15; //huidige positie onthouden
+					break; //case 4 van decoder channel
+				}
+				break; //draai15 mode
+			} //decoder==dcc_adres
+		}
 	}
-	/*
-	case 2: //DUO AR true schakeled stops+1, false schakeld stops
-		if (port == false) {
-			ad = ((ad * 2) - 1) - 1;
-		}
-		else { //port =true
-			ad = ((ad * 2)) - 1;
-		}
-		if (ad < aantalStops) {
-			stops_rq = ad;
-			ET_rq();
-			DSP_exe(12);
-		}
-		break;
-
-	case 3://Draai15 mode
-
-		break;
-	}
-
-	*/
-
 	//stop request maken
-	
 	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops) {
-        Serial.print(stop);
+		Serial.println(stop);
 		stops_rq = stop - 1;
-		ET_rq();
-		DSP_exe(12);
+				ET_rq();
+				DSP_exe(12);
 	}
+
 }
 //**End void's for DeKoder
+byte dr15() {
+	byte result;
+	if (GPIOR2 & (1 << 3)) {
+		result = draai15 + dr15ads; //dr15ads is aantal 'overkant' sporen uit koploper/draaischijf tekenen
+	}
+	else {
+		result = draai15;
+	}
+	return result;
+}
+
 void start() {
 	//Serial.print(F("Start POS= ")); Serial.println(POS);
 	PORTD &= ~(1 << 4); //free lock
@@ -529,6 +603,9 @@ void stop() {
 	GPIOR1 &= ~(1 << 6); //enable switches
 	PORTB &= ~(1 << 0); //Run led uit
 	EIMSK |= (1 << INT0); //enable DCC receive, ontvangst DCC mogelijk
+
+	GPIOR2 |= (1 << 4); //draai15 flag, enable 180 turn
+	draai15 = 0x00; // overbodig? dubbelop?
 }
 void noodstop() {
 	//Noodstop, schakelt motor uit, haalt vergrendeling los
@@ -699,8 +776,8 @@ void MEM_read() {
 	Vaccel = EEPROM.read(115);
 	if (Vaccel > 10)Vaccel = 8;
 
-	//toepassing = EEPROM.read(116); //0==draaischijf, 1=rolbrug 2=lift
-	//if (toepassing > 2)toepassing = 0;
+	dr15ads = EEPROM.read(116); //aantal 'overkant' sporen in draai15 mode
+	if (dr15ads > 8)dr15ads = 0;
 
 	speling = EEPROM.read(117);
 	if (speling > 254)speling = 10; //default speling, vrije slag in de aandrijving
@@ -830,6 +907,7 @@ void DSP_exe(byte txt) {
 			break;
 		case 6:
 			display.print(F(" DCC: ")); regel2;
+			
 			switch (DCC_mode) {
 			case 0:
 				display.print(F("Single"));//iedere stop een adres
@@ -845,7 +923,14 @@ void DSP_exe(byte txt) {
 				break;
 			}
 			break;
-		case 7: //Speling vrije slag, slip,
+
+		case 7:
+			display.print(F("DCC "));
+			regel2;
+			display.print(F("Dr15>> "));
+			display.print(dr15ads);
+			break;
+		case 8: //Speling vrije slag, slip,
 			display.print(F(" speling")); regel2;
 			display.print(speling);
 			break;
@@ -1434,7 +1519,7 @@ void SW_0(boolean onoff) { //up
 
 		case 3: //Instellingen met byte waardes
 			PRG_level++;
-			if (PRG_level > 7)PRG_level = 0;
+			if (PRG_level > 8)PRG_level = 0;
 			DSP_exe(40);
 			break;
 
@@ -1560,7 +1645,7 @@ void SW_2() {
 		EEPROM.update(114, aantalStops);
 		EEPROM.update(115, Vaccel);
 		EEPROM.update(104, DCC_mode);
-		//EEPROM.update(116, toepassing);
+		EEPROM.update(116, dr15ads);
 		EEPROM.update(117, speling);
 		COM_V();
 		OCR2A = Vhome;//????
@@ -1755,7 +1840,10 @@ void SW_encoder(boolean dir) {
 				DCC_mode--;
 				if (DCC_mode > 3)DCC_mode = 3;
 				break;
-			case 7:
+			case 7: //Draai15 mode aantal 'overkant' sporen
+				if (dr15ads > 0)dr15ads--;
+				break;
+			case 8:
 				if (speling > 0)speling--;
 				break;
 			}
@@ -1787,7 +1875,11 @@ void SW_encoder(boolean dir) {
 				DCC_mode++;
 				if (DCC_mode > 3)DCC_mode = 0;
 				break;
-			case 7: //speling, vrije slag
+			case 7: //in draai15 mode aantal 'overkant' sporen
+				dr15ads++;
+				if (dr15ads > 8)dr15ads = 0;
+				break;
+			case 8: //speling, vrije slag
 				if (speling < 254)speling++;
 				break;
 			}
@@ -1814,7 +1906,7 @@ void SW_encoder(boolean dir) {
 	}
 }
 void lock() {
-	//Serial.println(F("Lock"));
+	Serial.println(F("Lock"));
 	//doet alles om de brug te vergrendelen en vrij te geven voor een nieuwe draaiopdracht gebruik
 	//voorlopig alleen groene ledje op PIN4
 	//issue na noodstop BINNEN een melder mag brug niet vrij worden gegeven
@@ -1882,7 +1974,6 @@ void loop() {
 	slowcount++;//Counter voor langzame processen 1xin 255 cycli
 	if (slowcount > 100) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
 		slowcount = 0;
-
 
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
 		if (GPIOR1 & (1 << 1))SLOW(); //vertragen
