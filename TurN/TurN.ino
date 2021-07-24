@@ -13,7 +13,8 @@ Uitgegaan van treinlift project op 31jan2021
 
 Versie V3-1 bedoeld voor draaischijf zonder adres positionering.
 
-25april2021 begonnen aan versie V3-2 algemene versie
+Versie 4.0
+25april2021 begonnen aan versie V4.0 algemene versie
 Algemeen:
 Homen. Voor draaischijf altijd tegen de klok in. Rolbrug naar voren. Lift naar beneden. Algemene draairichting met hardware aanpassen hieraan.
 Aampassingen:
