@@ -493,7 +493,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 				case 4:
 
 					if (draai15 == dr15pos) {
-						Serial.print("+");
+						//Serial.print("+");
 
 						if (GPIOR2 & (1 << 4)) { //flag enable 180
 							Serial.print("/");
@@ -523,7 +523,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 	}
 	//stop request maken
 	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops) {
-		Serial.println(stop);
+		//Serial.println(stop);
 		stops_rq = stop - 1;
 				ET_rq();
 				DSP_exe(12);
@@ -795,15 +795,13 @@ void MEM_read() {
 		//stops[i].reg = EEPROM.read(i + 1); //reg = register met 8 booleans
 		//bit0 posities bepaald niet in EEPROM
 
-		if (MEM_reg & (1 << 0)) { //melder-mode
-			//Serial.print(F("pos  ")); Serial.println(stops[i].pos);
-			//Serial.print(F("fine  ")); Serial.println(stops[i].fine);
-		}
-		else { //home-mode
 			if (stops[i].pos == 0xFFFFFFFF) {
-				stops[i].pos = (3000 * i) + 100; //draaischijf			
+				stops[i].pos = (400000 * i) + 1000; //lift (peter)			
 			}
-		}
+
+		//	Serial.print(F("pos  ")); Serial.println(stops[i].pos);
+		//	Serial.print(F("fine  ")); Serial.println(stops[i].fine);
+
 	}
 	//stops_status = EEPROM.read(100);
 	//if (stops_status == 0xFF)stops_status = 0;
@@ -1906,7 +1904,7 @@ void SW_encoder(boolean dir) {
 	}
 }
 void lock() {
-	Serial.println(F("Lock"));
+	//Serial.println(F("Lock"));
 	//doet alles om de brug te vergrendelen en vrij te geven voor een nieuwe draaiopdracht gebruik
 	//voorlopig alleen groene ledje op PIN4
 	//issue na noodstop BINNEN een melder mag brug niet vrij worden gegeven
