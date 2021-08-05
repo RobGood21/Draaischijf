@@ -1,5 +1,5 @@
 /*
- Name:		TurN.ino
+ Name:		TurN_V1.ino
  Created:	31jan2021
  Author:	rob Antonisse
 
@@ -21,7 +21,8 @@ Aampassingen:
 Instelling keuze toepassing 0=draaischijf, 1=rolbrug, 2=lift
 
 
-Versie V5.1 overgegaan op NmraDcc library als decoder
+Deze versie is met deKoder, zelf ontworpen decoder voor DCC. Vermoedens bestaan dat deze decoder niet altijd compatibel is,
+daarom in Turn V5.01 NmraDcc library. 
 
 */
 
@@ -31,10 +32,6 @@ Versie V5.1 overgegaan op NmraDcc library als decoder
 #include <Adafruit_GFX.h>
 #include <splash.h>
 #include <Adafruit_SSD1306.h>
-
-#include <NmraDcc.h>
-NmraDcc  Dcc;
-
 
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
@@ -48,7 +45,28 @@ NmraDcc  Dcc;
 #define down PORTB &=~(1<<2);GPIOR0 &=~(1<<1);
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
+//**Declaraties for DeKoder
+//V3.00 Aantal buffers va 6 > 4 gebracht om geheugen ruimte te sparen. NIET GECHECKED! 
+
+volatile unsigned long DEK_Tperiode; //laatst gemeten tijd 
+volatile unsigned int DEK_duur; //gemeten duur van periode tussen twee interupts
+//boolean DEK_Monitor = false; //shows DCC commands as bytes
+byte DEK_Reg; //register voor de decoder 
+byte DEK_Status = 0;
+byte DEK_byteRX[4]; //max length commandoos for this decoder 6 bytes (5x data 1x error check)
+byte DEK_countPA = 0; //counter for preample
+byte DEK_BufReg[4]; //registerbyte for 12 command buffers, can be lowered.
+byte DEK_Buf0[4];
+byte DEK_Buf1[4];
+byte DEK_Buf2[4];
+byte DEK_Buf3[4];
+byte DEK_Buf4[4];
+byte DEK_Buf5[4];
+//**End declaration for deKoder
+
 int uniek = 0;
+
+
 byte DCC_adres;
 byte DCC_mode; //EEPROM 
 byte COM_reg;
@@ -71,7 +89,11 @@ struct stop
 };
 struct stop stops[16]; //melder met adres 1 is stops[0]
 
+//byte setcount;
+//byte setstop; //welke stop is in het proces van bepalen, setten
+
 byte aantalStops;
+//byte toepassing;
 byte lastup = 0;
 byte lastdown = 0;
 byte stops_rq;
@@ -91,9 +113,12 @@ byte Vstep; //instelling prescaler 64;128;259;1024
 byte count;
 byte startcount;
 byte speling;//speling of vrije slag in de aandrijving max 255
+
 byte draai15;
 byte dr15pos; //current position in draai15
 byte dr15ads; //draai15 aantal tegenover liggende sporen (koploper, Itrain)
+
+
 
 unsigned long runwait;
 byte Vaccel = 3; //ingestelde acceleratietijd in seconden
@@ -101,8 +126,6 @@ float accStep; //berekende tijd per snelheids step in microsec
 float puls;
 unsigned long accTijd; //verstreken tijd
 byte runfase;
-
-
 
 void setup() {
 	Serial.begin(9600);
@@ -120,15 +143,22 @@ void setup() {
 	Overhead van de arduino is ongeveer een 10% van het geheugen, dus kan maar 40% van het memory worden gebruikt voor de rest. Ongeveer 850bytes.
 	Overloop van het geheugen veroorzaakt enorm vreemde onvoorspeelbare  fouten.
 	*/
+
+	//**begin Setup for DeKoder 
+	//Serial.begin(9600); al gedaan
+
+	DDRD &= ~(1 << 2);//bitClear(DDRD, 2); //pin2 input interrupt ISR(INT0) on PIN2
+	DEK_Tperiode = micros();
+	EICRA |= (1 << 0);//EICRA – External Interrupt Control Register A bit0 > 1 en bit1 > 0 (any change)
+	EICRA &= ~(1 << 1);	//bitClear(EICRA, 1);
+	EIMSK |= (1 << INT0);//External Interrupt Mask Register bit0 INT0 > 1
+	//**End Setup for DeKoder
+
 	cd; //clear display
 	DSP_settxt(10, 10, 1); display.print(F("www.wisselmotor.nl"));
-	DSP_settxt(10, 30, 2); display.print(F("TurN V5.1"));
+	DSP_settxt(10, 30, 2); display.print("TurN V3.0");
 	display.display();
 	delay(2000);
-
-	Dcc.pin(0, 2, 1); //interrupt number 0; pin 2; pullup to pin2
-	Dcc.init(MAN_ID_DIY, 10, 0b10000000, 0); //bit7 true maakt accessoire decoder, bit6 false geeft decoder adres
-
 	//ports
 	PORTC |= (15 << 0); //pullup  A0~A3
 	DDRB |= (15 << 0); //Pin8~Pin11 as outputs
@@ -165,6 +195,7 @@ void setup() {
 	switchstatus[2] = 0xFF;
 	switchcount = 2; //Eerst geteste switchcount nu 0 (switches) 
 
+
 	MEM_read();
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen
@@ -177,21 +208,236 @@ void setup() {
 	}
 }
 
-void notifyDccAccTurnoutBoard(uint16_t BoardAddr, uint8_t OutputPair, uint8_t Direction, uint8_t OutputPower) {
-	//Call Back van NmraDcc library
-	//called als CV29 bit6 = false decoderadres,channel,poort,onoff (zie setup 'init')
-	//interupt mask register cleared in startmotor() en set in stop() om DCC te disabelen als motor draait. ((nog)niet in homen)
-	APP_DCC(BoardAddr, OutputPair +1, Direction, OutputPower); 
-}
+//********Begin Void's for DeKoder
+ISR(INT0_vect) { //ISR for DeKoder receive on Pin 2
+	//DEK_Reg fase van bit ontvangst
+	//bit 0= bitpart ok (1) of failed(0)
+	//bit1= truepart 
+	//bit2=falsepart
+	//bit3= received bit true =true false =false
+	//bit4=restart, begin, failed as true
 
-void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
-	//let op deze versie werkt met decoder(adres), channel, port, onoff
-	//Serial.println(channel);
+	cli();
+	DEK_duur = (micros() - DEK_Tperiode);
+	DEK_Tperiode = micros();
+	if (DEK_duur > 50) {
+		if (DEK_duur < 62) {
+			DEK_Reg |= (1 << 0); //bitSet(DekReg, 0);
+
+			if (bitRead(DEK_Reg, 1) == false) {
+				DEK_Reg &= ~(1 << 2); //bitClear(DekReg, 2);
+				DEK_Reg |= (1 << 1);
+			}
+			else { //received full true bit
+
+				DEK_Reg |= (1 << 3);
+				DEK_BitRX();
+				DEK_Reg &= ~(1 << 2);//bitClear(DekReg, 2);
+				DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);
+			}
+		}
+		else {
+			if (DEK_duur > 106) {
+
+				if (DEK_duur < 124) { //preferred 118 6us extra space in false bit
+					DEK_Reg |= (1 << 0); //bitSet(DekReg, 0);
+					if (bitRead(DEK_Reg, 2) == false) {
+						DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);
+						DEK_Reg |= (1 << 2);  //bitSet(DekReg, 2);
+					}
+					else { //received full false bit
+						DEK_Reg &= ~(1 << 3); //bitClear(DekReg, 3);
+						DEK_BitRX();
+						DEK_Reg &= ~(1 << 2);//bitClear(DekReg, 2);
+						DEK_Reg &= ~(1 << 1); //bitClear(DekReg, 1);
+					}
+				}
+			}
+		}
+	}
+	sei();
+}
+void DEK_begin() {//runs when bit is corrupted, or command not correct
+	//lesscount++;
+	DEK_countPA = 0;
+	DEK_Reg = 0;
+	DEK_Status = 0;
+	for (int i = 0; i < 6; i++) {
+		DEK_byteRX[i] = 0; //reset receive array
+	}
+}
+void DEK_BufCom(boolean CV) { //create command in Buffer
+	byte i = 0;
+	while (i < 12) {
+
+		if (bitRead(DEK_BufReg[i], 7) == false) {
+			DEK_BufReg[i] = 0; //clear found buffer
+
+
+			DEK_Buf0[i] = DEK_byteRX[0];
+			DEK_Buf1[i] = DEK_byteRX[1];
+			DEK_Buf2[i] = DEK_byteRX[2];
+
+			if (CV == true) {
+				DEK_BufReg[i] |= (1 << 0); //set for CV
+				DEK_Buf3[i] = DEK_byteRX[3];
+				DEK_Buf4[i] = DEK_byteRX[4];
+				DEK_Buf5[i] = DEK_byteRX[5];
+			}
+			else {
+
+				DEK_Buf3[i] = 0;
+				DEK_Buf4[i] = 0;
+				DEK_Buf5[i] = 0;
+			}
+			DEK_BufReg[i] |= (1 << 7); //claim buffer
+			i = 15;
+		}
+		i++;
+	} //close for loop
+} //close void
+void DEK_BitRX() { //new version
+	static byte countbit = 0; //counter received bits
+	static byte countbyte = 0;
+	static byte n = 0;
+	DEK_Reg |= (1 << 4);//resets and starts process if not reset in this void
+	switch (DEK_Status) {
+		//*****************************
+	case 0: //Waiting for preample 
+		if (bitRead(DEK_Reg, 3) == true) {
+			DEK_countPA++;
+			if (DEK_countPA > 12) {
+				DEK_Status = 1;
+				countbit = 0;
+				countbyte = 0;
+			}
+			bitClear(DEK_Reg, 4);
+		}
+		break;
+		//*************************
+	case 1: //Waiting for false startbit
+		if (bitRead(DEK_Reg, 3) == false) { //startbit receive
+			DEK_countPA = 0;
+			DEK_Status = 2;
+		}
+		//if Dekreg bit 3= true no action needed.
+		bitClear(DEK_Reg, 4); //correct, so resume process
+		break;
+		//*************************
+	case 2: //receiving data
+		if (bitRead(DEK_Reg, 3) == true) DEK_byteRX[countbyte] |= (1 << (7 - countbit));
+		countbit++;
+		if (countbit == 8) {
+			countbit = 0;
+			DEK_Status = 3;
+			countbyte++;
+		}
+		bitClear(DEK_Reg, 4); //correct, so resume process
+		break;
+		//*************************
+	case 3: //waiting for separating or end bit
+		if (bitRead(DEK_Reg, 3) == false) { //false bit
+			DEK_Status = 2; //next byte
+			if ((bitRead(DEK_byteRX[0], 6) == false) & (bitRead(DEK_byteRX[0], 7) == true))bitClear(DEK_Reg, 4); //correct, so resume process	
+		}
+		else { //true bit, end bit, only 3 byte and 6 byte commands handled by this dekoder
+			switch (countbyte) {
+			case 3: //Basic Accessory Decoder Packet received
+				//check error byte
+				if (DEK_byteRX[2] = DEK_byteRX[0] ^ DEK_byteRX[1])DEK_BufCom(false);
+				break; //6
+			case 6: ///Accessory decoder configuration variable Access Instruction received (CV)
+				//in case of CV, handle only write command
+				if (bitRead(DEK_byteRX[2], 3) == true && (bitRead(DEK_byteRX[2], 2) == true)) {
+					//check errorbyte and make command
+					if (DEK_byteRX[5] = DEK_byteRX[0] ^ DEK_byteRX[1] ^ DEK_byteRX[2] ^ DEK_byteRX[3] ^ DEK_byteRX[4])DEK_BufCom(true);
+				}
+				break;
+			} //close switch bytecount
+		}//close bittype
+		break;
+		//***************************************
+	} //switch dekstatus
+	if (bitRead(DEK_Reg, 4) == true)DEK_begin();
+}
+void DEK_DCCh() { //handles incoming DCC commands, called from loop()
+	static byte n = 0; //one buffer each passing
+	byte temp;
+	int decoder;
+	int channel = 1;
+	int adres;
+	boolean port = false;
+	boolean onoff = false;
+	int cv;
+	int value;
+
+	//translate command
+	if (bitRead(DEK_BufReg[n], 7) == true) {
+		decoder = DEK_Buf0[n] - 128;
+		if (bitRead(DEK_Buf1[n], 6) == false)decoder = decoder + 256;
+		if (bitRead(DEK_Buf1[n], 5) == false)decoder = decoder + 128;
+		if (bitRead(DEK_Buf1[n], 4) == false)decoder = decoder + 64;
+		//channel
+		if (bitRead(DEK_Buf1[n], 1) == true) channel = channel + 1;
+		if (bitRead(DEK_Buf1[n], 2) == true) channel = channel + 2;
+		//port
+		if (bitRead(DEK_Buf1[n], 0) == true)port = true;
+		//onoff
+		if (bitRead(DEK_Buf1[n], 3) == true)onoff = true;
+		//CV
+		if (bitRead(DEK_BufReg[n], 0) == true) {
+			cv = DEK_Buf3[n];
+			if (bitRead(DEK_Buf2[n], 0) == true)cv = cv + 256;
+			if (bitRead(DEK_Buf2[n], 1) == true)cv = cv + 512;
+			cv++;
+			value = DEK_Buf4[n];
+		}
+		else {
+			cv = 0;
+			value = 0;
+		}
+		COM_exe(bitRead(DEK_BufReg[n], 0), decoder, channel, port, onoff, cv, value);
+
+		//clear buffer
+		DEK_BufReg[n] = 0;
+		DEK_Buf0[n] = 0;
+		DEK_Buf1[n] = 0;
+		DEK_Buf2[n] = 0;
+		DEK_Buf3[n] = 0;
+		DEK_Buf4[n] = 0;
+		DEK_Buf5[n] = 0;
+	}
+	n++;
+	if (n > 6)n = 0;
+}
+void COM_exe(boolean type, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
+	int adres; int unq;
+
+	unq = type ^ decoder^channel^port^onoff;
+
+
+	adres = ((decoder - 1) * 4) + channel;
+	//Applications 
+	//APP_Monitor(type, adres, decoder, channel, port, onoff, cv, value);
+
+
+	//if (uniek != unq) { //alleen uniek nieuwe commands doorlaten
+	APP_DCC(type, adres, decoder, channel, port, onoff, cv, value);
+	//	uniek = unq;
+	//}
+
+	//Add a void like APP_monitor for application
+}
+void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, boolean onoff, int cv, int value) {
+	//Als motor draait geen DCC ontvangst. Start() disables DCC Stop() enables DCC (EIMKS masks register)
+	//Filter, alleen er toe doende commandoos doorlaten, als motor draait geen DCC ontvangst
+
 	unsigned int ad = 0; byte stop = 0;
 	// byte dr15;
-	ad = decoder - DCC_adres;  
-	if (ad >= 0 && ad < 4) { //max 4 decoder adressen, voor single mode 16 stops. 
+	ad = decoder - DCC_adres;
+	if (ad >= 0 && ad < 4 && type == false) {
 		ad = ad * 4 + channel;
+
 		//Serial.print(ad);
 
 		switch (DCC_mode) {
@@ -272,7 +518,8 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 								GPIOR2 ^= (1 << 3);
 							}
 						}
-						stop = dr15();					}//draai15==dr15pos
+						stop = dr15();
+					}//draai15==dr15pos
 					dr15pos = draai15; //huidige positie onthouden
 					break; //case 4 van decoder channel
 				}
@@ -284,16 +531,12 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops) {
 		//Serial.println(stop);
 		stops_rq = stop - 1;
-				ET_rq();
-				DSP_exe(12);
+		ET_rq();
+		DSP_exe(12);
 	}
 
 }
 //**End void's for DeKoder
-
-
-
-
 byte dr15() {
 	byte result;
 	if (GPIOR2 & (1 << 3)) {
@@ -304,6 +547,7 @@ byte dr15() {
 	}
 	return result;
 }
+
 void start() {
 	//Serial.print(F("Start POS= ")); Serial.println(POS);
 	PORTD &= ~(1 << 4); //free lock
@@ -354,8 +598,6 @@ void startmotor() {
 	GPIOR0 |= (1 << 5); //flag true motor draait, false motor staat stil
 	GPIOR1 |= (1 << 6); //disable switches
 	PORTB |= (1 << 0); //Run led rood
-
-
 	EIMSK &= ~(1 << INT0); //disable DCC receive, ontvangst niet mogelijk
 }
 void stop() {
@@ -366,8 +608,6 @@ void stop() {
 	GPIOR0 &= ~(1 << 5); //Flag motor draait niet
 	GPIOR1 &= ~(1 << 6); //enable switches
 	PORTB &= ~(1 << 0); //Run led uit
-
-
 	EIMSK |= (1 << INT0); //enable DCC receive, ontvangst DCC mogelijk
 
 	GPIOR2 |= (1 << 4); //draai15 flag, enable 180 turn
@@ -378,6 +618,7 @@ void noodstop() {
 	GPIOR2 ^= (1 << 1); //Toggle noodstop aan of uit
 	MOTOR(~GPIOR2 & (1 << 1));
 }
+
 void MOTOR(boolean offon) {
 	//Serial.println(F("Motor"));
 	//schakelt NOODSTOP in of uit en regelt dat alles goed opstart na een noodstop.
@@ -560,9 +801,9 @@ void MEM_read() {
 		//stops[i].reg = EEPROM.read(i + 1); //reg = register met 8 booleans
 		//bit0 posities bepaald niet in EEPROM
 
-			if (stops[i].pos == 0xFFFFFFFF) {
-				stops[i].pos = (400000 * i) + 1000; //lift (peter)			
-			}
+		if (stops[i].pos == 0xFFFFFFFF) {
+			stops[i].pos = (400000 * i) + 1000; //lift (peter)			
+		}
 
 		//	Serial.print(F("pos  ")); Serial.println(stops[i].pos);
 		//	Serial.print(F("fine  ")); Serial.println(stops[i].fine);
@@ -670,7 +911,7 @@ void DSP_exe(byte txt) {
 			break;
 		case 6:
 			display.print(F(" DCC: ")); regel2;
-			
+
 			switch (DCC_mode) {
 			case 0:
 				display.print(F("Single"));//iedere stop een adres
@@ -1732,7 +1973,8 @@ void ENC_select(boolean dir) {
 	}
 }
 void loop() {
-	Dcc.process();
+
+	DEK_DCCh();//tbv dekoder
 	slowcount++;//Counter voor langzame processen 1xin 255 cycli
 	if (slowcount > 100) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
 		slowcount = 0;
@@ -1770,6 +2012,8 @@ void loop() {
 				DSP_exe(12);
 			}
 		}
+
+
 		//Volgorde in LOOP is hier belangrijk, SW_read onderaan....
 		SW_read();
 	}

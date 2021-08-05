@@ -26,6 +26,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		Turn, beschrijving.txt = Turn, beschrijving.txt
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Turn_V1", "Turn_V1\Turn_V1.vcxproj", "{D7075CB9-CBB8-4165-8D55-1B95336BCD5E}"
+EndProject
 Global
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems*{6f6c8f01-0fa7-4ed9-affb-293fcedb64c4}*SharedItemsImports = 9
@@ -62,6 +64,10 @@ Global
 		{610D6C63-4B7C-45C3-ADD3-8C283439684F}.Debug|x86.Build.0 = Debug|Win32
 		{610D6C63-4B7C-45C3-ADD3-8C283439684F}.Release|x86.ActiveCfg = Release|Win32
 		{610D6C63-4B7C-45C3-ADD3-8C283439684F}.Release|x86.Build.0 = Release|Win32
+		{D7075CB9-CBB8-4165-8D55-1B95336BCD5E}.Debug|x86.ActiveCfg = Debug|Win32
+		{D7075CB9-CBB8-4165-8D55-1B95336BCD5E}.Debug|x86.Build.0 = Debug|Win32
+		{D7075CB9-CBB8-4165-8D55-1B95336BCD5E}.Release|x86.ActiveCfg = Release|Win32
+		{D7075CB9-CBB8-4165-8D55-1B95336BCD5E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
