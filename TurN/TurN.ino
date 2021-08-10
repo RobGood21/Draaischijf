@@ -280,8 +280,9 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 			} //decoder==dcc_adres
 		}
 	}
+
 	//stop request maken
-	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops) {
+	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops && ~GPIOR0 & (1<<5)) { //alleen als motor uit
 		//Serial.println(stop);
 		stops_rq = stop - 1;
 				ET_rq();
@@ -355,8 +356,7 @@ void startmotor() {
 	GPIOR1 |= (1 << 6); //disable switches
 	PORTB |= (1 << 0); //Run led rood
 
-
-	EIMSK &= ~(1 << INT0); //disable DCC receive, ontvangst niet mogelijk
+	//EIMSK &= ~(1 << INT0); //disable DCC receive, ontvangst niet mogelijk. Nu met GPIOR0 bit 5
 }
 void stop() {
 	//Serial.print(F("stop. POS= ")); Serial.println(POS);
@@ -368,7 +368,7 @@ void stop() {
 	PORTB &= ~(1 << 0); //Run led uit
 
 
-	EIMSK |= (1 << INT0); //enable DCC receive, ontvangst DCC mogelijk
+	//EIMSK |= (1 << INT0); //enable DCC receive, ontvangst DCC mogelijk
 
 	GPIOR2 |= (1 << 4); //draai15 flag, enable 180 turn
 	draai15 = 0x00; // overbodig? dubbelop?
