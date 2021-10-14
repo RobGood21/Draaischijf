@@ -501,7 +501,7 @@ void APP_DCC(boolean type, int adres, int decoder, int channel, boolean port, bo
 						//Serial.print("+");
 
 						if (GPIOR2 & (1 << 4)) { //flag enable 180
-							Serial.print("/");
+							//Serial.print("/");
 							GPIOR2 ^= (1 << 3); //set direct to counter track
 							GPIOR2 &= ~(1 << 4); //disable 180
 							stop = dr15();
@@ -1033,7 +1033,7 @@ void DSP_prg() {
 					startmotor();
 				}
 				else { //Niet gelijk, geen actie
-					Serial.println(F("niet gelijk"));
+					//Serial.println(F("niet gelijk"));
 				}
 			}
 			else { //home-mode
@@ -1163,7 +1163,7 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 }
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
 	melderadres = 0;
-	//Serial.print(F("SW_melderadres, switchstatus: ")); Serial.println(switchstatus[1], BIN);// zijn de melders
+	Serial.print(F("SW_melderadres, switchstatus: ")); Serial.println(switchstatus[1], BIN);// zijn de melders
 	for (byte i = 0; i < 4; i++) {
 		if (~switchstatus[1] & (1 << i)) {
 			switch (i) {
@@ -1251,12 +1251,12 @@ void MA_changed() {
 
 
 			if (GPIOR0 & (1 << 1)) {//updraaien POS_rq positief	
-				Serial.println("up");
+				//Serial.println("up");
 				POS_rq = ((stops[stops_rq].width / 2) + stops[stops_rq].fine);
 				POS = 0;
 			}
 			else {//down draaien POS_rq negatief	
-				Serial.println("dn");
+				//Serial.println("dn");
 				POS = (stops[stops_rq].width / 2) - stops[stops_rq].fine;
 				POS_rq = 0;
 			}

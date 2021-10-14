@@ -23,6 +23,10 @@ Instelling keuze toepassing 0=draaischijf, 1=rolbrug, 2=lift
 
 Versie V5.1 overgegaan op NmraDcc library als decoder
 
+14 okt 2021 V5.02
+Ernstige bug (hopelijk) opgelost.
+In SW_melderadres, Melder wordt nu 4x achter elkaar gelezen om bouncen en na elkaar van de adres bits te ondervangen.
+
 */
 
 
@@ -35,6 +39,8 @@ Versie V5.1 overgegaan op NmraDcc library als decoder
 #include <NmraDcc.h>
 NmraDcc  Dcc;
 
+
+#define version "V5.02"
 
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
@@ -121,8 +127,8 @@ void setup() {
 	Overloop van het geheugen veroorzaakt enorm vreemde onvoorspeelbare  fouten.
 	*/
 	cd; //clear display
-	DSP_settxt(10, 10, 1); display.print(F("www.wisselmotor.nl"));
-	DSP_settxt(10, 30, 2); display.print(F("TurN V5.1"));
+	DSP_settxt(8, 10, 1); display.print(F("www.wisselmotor.nl"));
+	DSP_settxt(8, 30, 2); display.print(F("TurN ")); display.print(version);
 	display.display();
 	delay(2000);
 
@@ -176,20 +182,18 @@ void setup() {
 		MOTOR(true);
 	}
 }
-
 void notifyDccAccTurnoutBoard(uint16_t BoardAddr, uint8_t OutputPair, uint8_t Direction, uint8_t OutputPower) {
 	//Call Back van NmraDcc library
 	//called als CV29 bit6 = false decoderadres,channel,poort,onoff (zie setup 'init')
 	//interupt mask register cleared in startmotor() en set in stop() om DCC te disabelen als motor draait. ((nog)niet in homen)
-	APP_DCC(BoardAddr, OutputPair +1, Direction, OutputPower); 
+	APP_DCC(BoardAddr, OutputPair + 1, Direction, OutputPower);
 }
-
 void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 	//let op deze versie werkt met decoder(adres), channel, port, onoff
 	//Serial.println(channel);
 	unsigned int ad = 0; byte stop = 0;
 	// byte dr15;
-	ad = decoder - DCC_adres;  
+	ad = decoder - DCC_adres;
 	if (ad >= 0 && ad < 4) { //max 4 decoder adressen, voor single mode 16 stops. 
 		ad = ad * 4 + channel;
 		//Serial.print(ad);
@@ -255,7 +259,7 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 						//Serial.print("+");
 
 						if (GPIOR2 & (1 << 4)) { //flag enable 180
-							Serial.print("/");
+							//Serial.print("/");
 							GPIOR2 ^= (1 << 3); //set direct to counter track
 							GPIOR2 &= ~(1 << 4); //disable 180
 							stop = dr15();
@@ -272,7 +276,8 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 								GPIOR2 ^= (1 << 3);
 							}
 						}
-						stop = dr15();					}//draai15==dr15pos
+						stop = dr15();
+					}//draai15==dr15pos
 					dr15pos = draai15; //huidige positie onthouden
 					break; //case 4 van decoder channel
 				}
@@ -282,18 +287,15 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 	}
 
 	//stop request maken
-	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops && ~GPIOR0 & (1<<5)) { //alleen als motor uit
+	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops && ~GPIOR0 & (1 << 5)) { //alleen als motor uit
 		//Serial.println(stop);
 		stops_rq = stop - 1;
-				ET_rq();
-				DSP_exe(12);
+		ET_rq();
+		DSP_exe(12);
 	}
 
 }
 //**End void's for DeKoder
-
-
-
 
 byte dr15() {
 	byte result;
@@ -560,9 +562,9 @@ void MEM_read() {
 		//stops[i].reg = EEPROM.read(i + 1); //reg = register met 8 booleans
 		//bit0 posities bepaald niet in EEPROM
 
-			if (stops[i].pos == 0xFFFFFFFF) {
-				stops[i].pos = (400000 * i) + 1000; //lift (peter)			
-			}
+		if (stops[i].pos == 0xFFFFFFFF) {
+			stops[i].pos = (400000 * i) + 1000; //lift (peter)			
+		}
 
 		//	Serial.print(F("pos  ")); Serial.println(stops[i].pos);
 		//	Serial.print(F("fine  ")); Serial.println(stops[i].fine);
@@ -670,7 +672,7 @@ void DSP_exe(byte txt) {
 			break;
 		case 6:
 			display.print(F(" DCC: ")); regel2;
-			
+
 			switch (DCC_mode) {
 			case 0:
 				display.print(F("Single"));//iedere stop een adres
@@ -792,7 +794,7 @@ void DSP_prg() {
 					startmotor();
 				}
 				else { //Niet gelijk, geen actie
-					Serial.println(F("niet gelijk"));
+					//Serial.println(F("niet gelijk"));
 				}
 			}
 			else { //home-mode
@@ -920,9 +922,13 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 
 	} //GPIOR1
 }
+byte melderold; byte meldercount = 0;
+
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
-	melderadres = 0;
-	//Serial.print(F("SW_melderadres, switchstatus: ")); Serial.println(switchstatus[1], BIN);// zijn de melders
+	//meldercount
+	//melderold
+	melderadres = 0; bool meldervalid = false;
+	//Serial.print(F("SW_melderadres, switchstatus: ")); Serial.println(15-switchstatus[1]);// zijn de melders
 	for (byte i = 0; i < 4; i++) {
 		if (~switchstatus[1] & (1 << i)) {
 			switch (i) {
@@ -942,11 +948,37 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		}
 	}
 
+
+
+	//hier is melderadres bekend 
+	if (melderold == melderadres) {
+		meldercount++;
+			//Serial.println(melderadres);
+		if (meldercount > 3) {
+			meldervalid = true;
+		}
+	}
+	else {
+		melderold = melderadres;
+		meldercount = 0;
+		meldervalid = false;
+	}
+
+	if (!meldervalid) { //geen geldig melderadres
+		switchstatus[1] = 0xFF; //genereerd direct nieuwe melder uitlezing
+		return;
+	}
+
+
+
 	if (GPIOR1 & (1 << 2)) { //set in setup
 		GPIOR1 &= ~(1 << 2);
 		MOTOR(true);
 	}
 
+
+	//Hier zit iets niet goed
+	//Als leds niet gelijk gaan wordt boodschap overgeslagen van een nieuw stop
 
 	if ((melderTemp > 0 && melderadres == 0) || (melderTemp == 0 && melderadres > 0)) {
 		//dit dient om 'tussenmelderadres' onmogelijk te maken van 3 via 2 naar 0 bv...
@@ -956,6 +988,8 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		DSP_exe(12);
 		melderOld = melderadres;
 	}
+
+
 	melderTemp = melderadres;
 }
 void MA_changed() {
@@ -1010,12 +1044,12 @@ void MA_changed() {
 
 
 			if (GPIOR0 & (1 << 1)) {//updraaien POS_rq positief	
-				Serial.println("up");
+				//Serial.println("up");
 				POS_rq = ((stops[stops_rq].width / 2) + stops[stops_rq].fine);
 				POS = 0;
 			}
 			else {//down draaien POS_rq negatief	
-				Serial.println("dn");
+				//Serial.println("dn");
 				POS = (stops[stops_rq].width / 2) - stops[stops_rq].fine;
 				POS_rq = 0;
 			}
@@ -1734,6 +1768,7 @@ void ENC_select(boolean dir) {
 void loop() {
 	Dcc.process();
 	slowcount++;//Counter voor langzame processen 1xin 255 cycli
+
 	if (slowcount > 100) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
 		slowcount = 0;
 
@@ -1770,6 +1805,7 @@ void loop() {
 				DSP_exe(12);
 			}
 		}
+
 		//Volgorde in LOOP is hier belangrijk, SW_read onderaan....
 		SW_read();
 	}

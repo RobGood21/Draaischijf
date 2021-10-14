@@ -41,7 +41,7 @@ bit 1 Noodstop true aan, alles uit grendel los, false uit
 bit 2 Timer voor motor uit in lock(). true=timer in gebruik false= timer vrij timer runwait wordt dubbel gebruikt ook in et_rq()
 bit3 draai15 flag, direct of counter spoor (tegenoverliggend spoor)
 bit4 draai15 flag, enbale 180 graden turn true ()disable false
-bit5
+bit5 
 bit6
 bit7
 
