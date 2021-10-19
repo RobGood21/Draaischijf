@@ -59,7 +59,7 @@ byte DCC_adres;
 byte DCC_mode; //EEPROM 
 byte COM_reg;
 byte MEM_reg;
-byte slowcount;
+int slowcount; //was een byte
 
 long POS;
 long POS_rq;
@@ -1769,7 +1769,7 @@ void loop() {
 	Dcc.process();
 	slowcount++;//Counter voor langzame processen 1xin 255 cycli
 
-	if (slowcount > 100) { //V3.00 is deze tijd 2x zo lang geworden, check of encoder het nog lekker doet
+	if (slowcount > 1000) { //V3.00 snelheid van lezen en uitvoeren 
 		slowcount = 0;
 
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
