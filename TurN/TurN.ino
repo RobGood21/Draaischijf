@@ -26,6 +26,11 @@ Versie V5.1 overgegaan op NmraDcc library als decoder
 14 okt 2021 V5.02
 Ernstige bug (hopelijk) opgelost.
 In SW_melderadres, Melder wordt nu 4x achter elkaar gelezen om bouncen en na elkaar van de adres bits te ondervangen.
+23okt2021
+bug25okt het hoogzetten van pin 4 portd4 doen ook na noodstop bit4 van gpior1 komt daarmee weer als 
+niet in gebruik
+
+
 
 */
 
@@ -52,15 +57,17 @@ NmraDcc  Dcc;
 #define regelst DSP_settxt(1,1,1)
 #define up PORTB |=(1<<2);GPIOR0 |=(1<<1);
 #define down PORTB &=~(1<<2);GPIOR0 &=~(1<<1);
-Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
-int uniek = 0;
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1); //constructor display
+
 byte DCC_adres;
 byte DCC_mode; //EEPROM 
 byte COM_reg;
 byte MEM_reg;
-int slowcount; //was een byte
+byte slowcount; //was een byte
 
+//kunnen dit geen ints worden????
 long POS;
 long POS_rq;
 long POS_acc; //aantal stappen tussen afrem posities
@@ -68,6 +75,7 @@ long POS_calc; //afrem positie
 
 struct stop
 {
+	//kunnen pos en width geen int of bytes worden? misschien met een berekende factor?
 	long pos; //(melders)Afstand naar Volgende stop. (Home)stopplek
 	int width; //(melders)afstand tussen de twee melder edges
 	int16_t fine; //afwijking middenount tussen edges
@@ -96,6 +104,7 @@ byte Vmax;
 byte Vstep; //instelling prescaler 64;128;259;1024
 byte count;
 byte startcount;
+byte melderold; byte meldercount = 0; //misschien zijn counters dubbel te gebruiken?
 byte speling;//speling of vrije slag in de aandrijving max 255
 byte draai15;
 byte dr15pos; //current position in draai15
@@ -107,8 +116,6 @@ float accStep; //berekende tijd per snelheids step in microsec
 float puls;
 unsigned long accTijd; //verstreken tijd
 byte runfase;
-
-
 
 void setup() {
 	Serial.begin(9600);
@@ -138,7 +145,7 @@ void setup() {
 	//ports
 	PORTC |= (15 << 0); //pullup  A0~A3
 	DDRB |= (15 << 0); //Pin8~Pin11 as outputs
-	DDRD |= (1 << 4); //pin4 as output (groene led) lock
+
 
 	//factory reset
 	DDRD |= (1 << 7); //set pins om switches uit te lezen voor de factory reset 
@@ -153,8 +160,12 @@ void setup() {
 		delay(500);
 	}
 
+	DDRD |= (1 << 4); //pin4 as output (groene led) lock
+
+		//moet dit geen outputs zijn?????, nee in prg worden de pins dir en waarde telkens geschakeld
 	DDRD &= ~(B11100000); //Pins 7,6,5 as input
-	PORTD |= (B11110000); //pins 7,6,5 set pull-up
+
+	PORTD |= (B11100000); //pins 7,6,5 set pull-up, pin 4 laag
 
 	//timer 2 settings on pin11 compare match
 	TCCR2A |= (1 << 6); //toggle pin6
@@ -172,6 +183,7 @@ void setup() {
 	switchcount = 2; //Eerst geteste switchcount nu 0 (switches) 
 
 	MEM_read();
+
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen
 		//MOTOR() called from sw_melderadres() nadat 1x demelderadressen zijn getoetst.
@@ -190,14 +202,12 @@ void notifyDccAccTurnoutBoard(uint16_t BoardAddr, uint8_t OutputPair, uint8_t Di
 }
 void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 	//let op deze versie werkt met decoder(adres), channel, port, onoff
-	//Serial.println(channel);
+
 	unsigned int ad = 0; byte stop = 0;
 	// byte dr15;
 	ad = decoder - DCC_adres;
 	if (ad >= 0 && ad < 4) { //max 4 decoder adressen, voor single mode 16 stops. 
 		ad = ad * 4 + channel;
-		//Serial.print(ad);
-
 		switch (DCC_mode) {
 		case 0: //Single alleen true port schakeld stops
 			if (port == true) {
@@ -256,10 +266,9 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 				case 4:
 
 					if (draai15 == dr15pos) {
-						//Serial.print("+");
 
 						if (GPIOR2 & (1 << 4)) { //flag enable 180
-							//Serial.print("/");
+
 							GPIOR2 ^= (1 << 3); //set direct to counter track
 							GPIOR2 &= ~(1 << 4); //disable 180
 							stop = dr15();
@@ -288,7 +297,7 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 
 	//stop request maken
 	if (stop > 0 && stops_rq != stop - 1 && stop <= aantalStops && ~GPIOR0 & (1 << 5)) { //alleen als motor uit
-		//Serial.println(stop);
+
 		stops_rq = stop - 1;
 		ET_rq();
 		DSP_exe(12);
@@ -296,7 +305,6 @@ void APP_DCC(int decoder, int channel, boolean port, boolean onoff) {
 
 }
 //**End void's for DeKoder
-
 byte dr15() {
 	byte result;
 	if (GPIOR2 & (1 << 3)) {
@@ -308,49 +316,48 @@ byte dr15() {
 	return result;
 }
 void start() {
-	//Serial.print(F("Start POS= ")); Serial.println(POS);
-	PORTD &= ~(1 << 4); //free lock
-	if (GPIOR0 & (1 << 3)) { //motor aan	
-		//OCR2A = Vhome; //V3.00 uitgezet
-		if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
-			if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
-			GPIOR0 |= (1 << 4); //versnellen	
-			//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
-			//aantal steps berekenen
-			POS_acc = 0;
-			for (byte i = Vmax; i <= Vmin; i++) {
-				//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
-				//accStep duur van 1 snelheidstap in milisec from MEM_read()
-				POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+	//Serial.println(GPIOR0, BIN);
+	//PORTD &= ~(1 << 4); //free lock V5.02 weggehaald
+	//if (GPIOR0 & (1 << 3)) { //motor aan weggehaald V5.02, only called als motor aan is
+
+	if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
+		if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
+		GPIOR0 |= (1 << 4); //versnellen	
+		//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
+		//aantal steps berekenen
+		POS_acc = 0;
+		for (byte i = Vmax; i <= Vmin; i++) {
+			//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
+			//accStep duur van 1 snelheidstap in milisec from MEM_read()
+			POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+		}
+		//richting en POS_calc instellen
+		if (GPIOR0 & (1 << 1)) { //up
+			if ((POS_rq - POS) / 2 <= POS_acc) {
+				POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
 			}
-			//richting en POS_calc instellen
-			if (GPIOR0 & (1 << 1)) { //up
-				if ((POS_rq - POS) / 2 <= POS_acc) {
-					//Serial.println("kleiner");
-					POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
-				}
-				else {
-					POS_calc = POS_rq - POS_acc;
-				}
-			}
-			else { //down
-				if ((POS - POS_rq) / 2 <= POS_acc) {
-					//Serial.println("groter");
-					POS_calc = POS_rq + ((POS - POS_rq) / 2);
-				}
-				else {
-					POS_calc = POS_rq + POS_acc;
-				}
+			else {
+				POS_calc = POS_rq - POS_acc;
 			}
 		}
-		else {
-			OCR2A = Vhome;
-		} //going home, searching stop
-		//Serial.print(F("POSrq :")); Serial.print(POS_rq); Serial.print(F("  POS_calc :")); Serial.println(POS_calc);
-		startmotor();
+		else { //down
+			if ((POS - POS_rq) / 2 <= POS_acc) {
+				POS_calc = POS_rq + ((POS - POS_rq) / 2);
+			}
+			else {
+				POS_calc = POS_rq + POS_acc;
+			}
+		}
 	}
+	else {
+		OCR2A = Vhome;
+	} //going home, searching stop
+
+	startmotor();
+	//} //V5.02
 }
 void startmotor() {
+	//Serial.println("sm"); //25okt
 	//PORTB &= ~(1 << 1); //enable motor, ENA van driver 
 	TCCR2B |= (1 << 3); //enable interrupt prescaler 
 	TIMSK2 |= (1 << 1); //enable interupt 
@@ -361,7 +368,7 @@ void startmotor() {
 	//EIMSK &= ~(1 << INT0); //disable DCC receive, ontvangst niet mogelijk. Nu met GPIOR0 bit 5
 }
 void stop() {
-	//Serial.print(F("stop. POS= ")); Serial.println(POS);
+
 	TCCR2B &= ~(1 << 3); //disable interrupt prescaler
 	TIMSK2 &= ~(1 << 1); //disable interrupt
 	GPIOR0 &= ~(1 << 4); //motor vertragen. Vertragen/versnellen flag
@@ -381,29 +388,26 @@ void noodstop() {
 	MOTOR(~GPIOR2 & (1 << 1));
 }
 void MOTOR(boolean offon) {
-	//Serial.println(F("Motor"));
-	//schakelt NOODSTOP in of uit en regelt dat alles goed opstart na een noodstop.
-	//if (toggle) {
-		//GPIOR0 ^= (1 << 3); //Motor aan of uit 
+	//if (offon) {
+	//	GPIOR0 |= (1 << 3); //on
 	//}
 	//else {
-	if (offon) {
-		GPIOR0 |= (1 << 3); //on
-	}
-	else {
-		GPIOR0 &= ~(1 << 3); //off
-	}
+	//	GPIOR0 &= ~(1 << 3); //off
 	//}
+	//if (~GPIOR0 & (1 << 3)) { //Motor uit V5.02
+	//Serial.println("M"); //bug25okt
 
-	if (~GPIOR0 & (1 << 3)) { //Motor uit
+	if (!offon) {
+		GPIOR0 &= ~(1 << 3); //off
 		PORTB |= (1 << 1); //disable motor, ENA van motor driver
-		PORTD &= ~(1 << 4); //lock, vergrendeling los maken
+		PORTD &= ~(1 << 4); //lock, vergrendeling los maken portdlaag
 		stop();
 		DSP_exe(20);
 		GPIOR1 |= (1 << 6); //disable switches 
 
 	}
 	else {
+		GPIOR0 |= (1 << 3); //on
 		PORTB &= ~(1 << 1); //enable motor, ENA laag van de motordriver
 		//na noodstop moet alle waardes worden gereset in melder-mode
 		//NIET in home-mode want die waardes zijn handmatig ingevoerd
@@ -415,21 +419,21 @@ void MOTOR(boolean offon) {
 			stops_current = 0;
 			stops_rq = 0;
 			runfase = 0;
-			if (melderadres > 0) GPIOR1 |= (1 << 4); //niet vrij geven als noodstop in melder
+			//Serial.println(melderadres); //25okt
+			//if (melderadres > 0) GPIOR1 |= (1 << 4); //niet vrij geven als noodstop in melder bug25okt
 		}
 		RUN_home();
 	}
 	PRG_fase = 0;
 }
-void RUN_home() { //move to HOME	//Serial.println(melderadres);
-	//Serial.println(F("Runhome"));
-	//Serial.println(melderadres);
+void RUN_home() { //move to HOME
+	//Serial.println("run");
 	if (MEM_reg & (1 << 0) && melderadres > 0) { //Melder-mode	
 		//Als brug in een stop staat niks doen in melder-mode
 		stops_rq = melderadres - 1;
 		DSP_exe(12);
 		stop();
-		lock(); //hmmm V3.00 denk ik niet hier....
+		lock();
 		stops_current = stops_rq;
 	}
 	else { //home-mode of op tussengebied, geen active melder	
@@ -475,8 +479,8 @@ ISR(TIMER2_COMPA_vect) {
 			}
 			else { //home mode
 				stop();
-				PORTD |= (1 << 4); //lock bridge on
-				//Serial.print(F("ISR POS ")); Serial.println(POS);
+				//Serial.print("ÏSR");
+				PORTD |= (1 << 4); //lock bridge on	portdhoog			
 			}
 		}
 		else if (POS == POS_calc) {
@@ -497,7 +501,6 @@ void FAST() { //versnellen tijd gebaseerd
 	}
 }
 void SLOW() { //vertragen positie en tijd gebaseerd, called from loop 
-	//Serial.print(F("*"));
 	GPIOR1 &= ~(1 << 1); //reset bit thats calls SLOW()
 	GPIOR0 &= ~(1 << 4); //reset versnelling
 //aantal stappen berekenen met deze snelheid. 
@@ -510,16 +513,10 @@ void SLOW() { //vertragen positie en tijd gebaseerd, called from loop
 	else { ///going down
 		POS_calc = POS - POS_acc;
 	}
-	//Serial.print(F("POS_rq= ")); Serial.print(POS_rq);Serial.print(F("   POS :")); Serial.print(POS); Serial.print(F("  POS_calc :")); Serial.println(POS_calc);
-
 }
 void FACTORY() {
-	//clears eeprom
-	//Serial.println(F("factory"));
-
 	for (int i = 0; i < EEPROM.length(); i++) {
 		EEPROM.update(i, 0xFF);
-		//delay(1);
 	}
 }
 void MEM_read() {
@@ -527,7 +524,6 @@ void MEM_read() {
 	//snelheden worden als 255-Vsnelheid getoond
 
 	MEM_reg = EEPROM.read(102);
-	//Serial.print(F("MEM_reg: ")); Serial.println(MEM_reg, BIN);
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 50;
 	Vmin = EEPROM.read(111);
@@ -565,13 +561,7 @@ void MEM_read() {
 		if (stops[i].pos == 0xFFFFFFFF) {
 			stops[i].pos = (400000 * i) + 1000; //lift (peter)			
 		}
-
-		//	Serial.print(F("pos  ")); Serial.println(stops[i].pos);
-		//	Serial.print(F("fine  ")); Serial.println(stops[i].fine);
-
 	}
-	//stops_status = EEPROM.read(100);
-	//if (stops_status == 0xFF)stops_status = 0;
 	COM_V();
 }
 void COM_V() { //diverse berekeningen voor snelheid
@@ -783,18 +773,15 @@ void DSP_prg() {
 			break;
 
 		case 1: //instellen gekozen stops
-			//Serial.println(melderadres)
+
 			if (MEM_reg & (1 << 0)) { //melder-mode
 				if (melderadres - 1 == stops_rq) {
-					//Serial.println(F("gelijk"));
+
 					//brug nu down draaien tot melder edge
 					runfase = 40;
 					up;
 					OCR2A = Vhome;
 					startmotor();
-				}
-				else { //Niet gelijk, geen actie
-					//Serial.println(F("niet gelijk"));
 				}
 			}
 			else { //home-mode
@@ -807,16 +794,11 @@ void DSP_prg() {
 				if (melderadres - 1 == stops_current) { //Alleen opslaan als brug nog BINNEN de melder-edges staat
 					stops[stops_current].fine = POS;
 					EEPROM.put(300 + (5 * stops_current), stops[stops_current].fine);
-					//Serial.print(F("Fine: ")); Serial.println(stops[stops_current].fine);
 				}
-
-
 			}
 			else { //home-mode
 				stops[stops_rq].pos = POS;
-				//stops_status &= ~(1 << stops_rq);
 				EEPROM.put(200 + (5 * stops_rq), POS);
-				//EEPROM.update(100, stops_status);
 			}
 			PRG_level = 0;
 			DSP_exe(15);
@@ -857,21 +839,19 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 			DDRD &= ~(1 << 5);
 			DDRD &= ~(1 << 6);
 			DDRD |= (1 << 7);
-			PORTD &= ~(1 << 7); //set pin			
+			PORTD &= ~(1 << 7); //reset pin 7			
 			break;
 		case 1:
 			DDRD &= ~(1 << 5);
 			DDRD &= ~(1 << 7);
-
 			DDRD |= (1 << 6);
-			PORTD &= ~(1 << 6); //set pin	break;	
+			PORTD &= ~(1 << 6); //reset pin 6	
 			break;
 		case 2:
 			DDRD &= ~(1 << 6);
 			DDRD &= ~(1 << 7);
-
 			DDRD |= (1 << 5);
-			PORTD &= ~(1 << 5); //set pin
+			PORTD &= ~(1 << 5); //reset pin 5
 			break;
 		}
 	} //GPIOR1
@@ -901,7 +881,6 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 		//	sr |=(B11110000);
 
 		changed = sr ^ switchstatus[switchcount];
-		//if (changed > 0) Serial.println("ch");
 		for (byte i = 0; i < 4; i++) {
 			if (changed & (1 << i)) {
 				if (~sr & (1 << i)) {
@@ -916,19 +895,16 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 		switchstatus[switchcount] = sr;
 
 		if (MEM_reg & (1 << 0)) { //als positie met melders
-			//if (GPIOR1 & (1 << 2)) SW_melderadres();
+			//if (GPIOR1 & (1 << 2)) SW_melderadres(); //V5.02
 			if (changed > 0 && switchcount == 1)SW_melderadres(); //melders veranderd
 		}
 
 	} //GPIOR1
 }
-byte melderold; byte meldercount = 0;
-
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
 	//meldercount
 	//melderold
 	melderadres = 0; bool meldervalid = false;
-	//Serial.print(F("SW_melderadres, switchstatus: ")); Serial.println(15-switchstatus[1]);// zijn de melders
 	for (byte i = 0; i < 4; i++) {
 		if (~switchstatus[1] & (1 << i)) {
 			switch (i) {
@@ -948,12 +924,10 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		}
 	}
 
-
-
-	//hier is melderadres bekend 
+	//vanaf V5.02 melders moeten 4x goed worden gemeten voordat ze worden als valid worden gezien
+	//nodig omdat niet altijd het adres precies gelijk op de melderpoorten komt.
 	if (melderold == melderadres) {
 		meldercount++;
-			//Serial.println(melderadres);
 		if (meldercount > 3) {
 			meldervalid = true;
 		}
@@ -970,32 +944,22 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 	}
 
 
-
 	if (GPIOR1 & (1 << 2)) { //set in setup
 		GPIOR1 &= ~(1 << 2);
 		MOTOR(true);
 	}
 
-
-	//Hier zit iets niet goed
-	//Als leds niet gelijk gaan wordt boodschap overgeslagen van een nieuw stop
-
 	if ((melderTemp > 0 && melderadres == 0) || (melderTemp == 0 && melderadres > 0)) {
 		//dit dient om 'tussenmelderadres' onmogelijk te maken van 3 via 2 naar 0 bv...
-		//Serial.print(F("Melderadres: ")); Serial.println(melderadres);
 		//hier VERANDERING van melder status
 		MA_changed(); //Als bit3 =true melders uitschakelen, draaien naar POS_rq en stoppen. 
 		DSP_exe(12);
 		melderOld = melderadres;
 	}
-
-
 	melderTemp = melderadres;
 }
 void MA_changed() {
-	//Serial.print(F("adres: ")); Serial.println(melderadres);
 	byte stp;
-
 	switch (runfase) {
 	case 0: //zoeken naar stops
 		if (melderadres == 0) { //melder vrijgekomen, breedte melder gemeten
@@ -1016,7 +980,6 @@ void MA_changed() {
 				stp = melderadres - 1; //afstand tot deze stop is bepaald dus -1
 
 				if (GPIOR0 & (1 << 0)) { //zoekt positie
-					//Serial.println(F("MA-changed found stop"));
 					if (melderadres == aantalStops) { //voorbij eerste stop gestart
 						stops_current = stp;
 						up;
@@ -1041,20 +1004,14 @@ void MA_changed() {
 		if (melderadres - 1 == stops_rq) {
 			//gedraaid edge aankomst melder nu bereikt. 
 			//stops_rq moet bekend zijn...
-
-
 			if (GPIOR0 & (1 << 1)) {//updraaien POS_rq positief	
-				//Serial.println("up");
 				POS_rq = ((stops[stops_rq].width / 2) + stops[stops_rq].fine);
 				POS = 0;
 			}
 			else {//down draaien POS_rq negatief	
-				//Serial.println("dn");
 				POS = (stops[stops_rq].width / 2) - stops[stops_rq].fine;
 				POS_rq = 0;
 			}
-
-			//Serial.print(F("MA_changed 20 POS_rq= ")); Serial.println(POS_rq);
 			RUN_rq();
 			runfase = 10;
 		}
@@ -1065,7 +1022,6 @@ void MA_changed() {
 
 	case 40: //stops fine bepalen
 		//in geval dat brug in stop staat eerst down draaien om melder edge te vinden
-		//Serial.print(F("Stops_current: ")); Serial.println(stops_current);
 		if (melderadres == 0) { //melder komt vrij edge bereikt
 			POS = 0;
 			down;
@@ -1077,7 +1033,6 @@ void MA_changed() {
 			runfase = 42;
 		}
 		break;
-
 	case 42:
 		stop();
 		//call F-width zonder speling 2x is van richting veranderd wat de speling in de aandrijving weer (ongeveer) 0 maakt
@@ -1086,45 +1041,26 @@ void MA_changed() {
 	}
 }
 void F_width(byte stp, boolean splng) { //breedte van een melder bepaald
-
-	//Serial.print(F("F_width POS:  ")); Serial.println(POS);
-
 	stops[stp].reg &= ~(1 << 1);
 	stops[stp].width = abs(POS); //altijd een positieve waarde
-
 	if (stp == stops_rq) {
-
 		GPIOR0 &= ~(1 << 5); //Flag motor draait niet
-
-		//		stop(); //V3.00 
-		//GPIOR0 ^=(1 << 1); //verander richting??
-
-
-
 		//hier is van de stops_rq melder de width bekend	
 		//Berekening POS_rq van edge naar stop tijdens het meten van de width. 
 		//Berekening voor edge naar stop in normaal bedrijf gebeurt in MA_changed
 		//Speling is de speling in de aandrijving, moet worden meegeteld als er van richting wordt veranderd,
-		//Stepper maakt dan een x-aantal steps voordat de brug weer draait, de speling of vrije slag.
-
-		//if (POS >= 0) {
+		//Stepper maakt dan een x-aantal steps voordat de brug weer draait, de speling of vrije slag.	
 
 		if (GPIOR0 & (1 << 1)) { //draait up
-			//Serial.println(">");
 			POS_rq = calcPos(stp, true);
 			if (splng)POS_rq = POS_rq - speling;
 		}
 		else {
 			POS_rq = calcPos(stp, false);
-			//Serial.println("<");
 			if (splng)POS_rq = POS_rq + speling;
 		}
-
-
-		//Serial.print(F("F_width POS_rq= ")); Serial.println(POS_rq);
 		RUN_rq();
 		runfase = 10;
-		//monitor();
 	}
 
 	else {
@@ -1147,16 +1083,7 @@ void F_pos(byte stp) {
 	stops[stp].reg &= ~(1 << 2);
 	stops[stp].pos = abs(POS); // Altijd positief waarde
 }
-void monitor() {
-	//geeft debug data
-	for (byte i = 0; i < aantalStops; i++) {
-		Serial.print(F("Stop:")); Serial.print(i); Serial.print(F("  POS= ")); Serial.print(stops[i].pos);
-		Serial.print(F("  width= ")); Serial.print(stops[i].width); Serial.print(F("  reg: ")); Serial.println(stops[i].reg, BIN);
-	}
-	Serial.println("");
-}
 void SW_off(byte sw) {
-	//Serial.print("uit: "); Serial.println(sw);
 	switch (sw) {
 	case 0:
 		SW_0(false);
@@ -1205,7 +1132,7 @@ void SW_off(byte sw) {
 	}
 }
 void SW_on(byte sw) {
-	//Serial.print("Switch on: "); Serial.println(sw);
+
 	switch (sw) {
 	case 0:
 		SW_0(true);
@@ -1222,9 +1149,6 @@ void SW_on(byte sw) {
 		//MELDERS ******
 	case 4:
 		if (~MEM_reg & (1 << 0)) { //als positie met home switch 
-			//Serial.println(F("melder0"));
-			//niet voor testen
-
 			if (GPIOR0 & (1 << 0)) { //home gevonden
 				stop();
 				POS = 0;
@@ -1238,13 +1162,6 @@ void SW_on(byte sw) {
 			}
 		}
 		break;
-	case 5:
-		break;
-	case 6:
-		break;
-	case 7:
-		break;
-
 	case 8://enc A
 		switch (ENC_count) {
 		case 0:
@@ -1273,11 +1190,6 @@ void SW_on(byte sw) {
 		break;
 	case 10://Enc switch
 		noodstop();
-		//MOTOR(true, false); //toggle motor on/off
-		//PORTB ^= (1 << 1); //toggle enable poort
-		break;
-	case 11: //nc
-
 		break;
 	}
 }
@@ -1424,12 +1336,6 @@ void SW_2() {
 		//MOTOR(true, false);
 		break;
 	case 2: //instellen etages
-		//if (MEM_reg & (1 << 0)) { //melder-mode
-		//if (runfase > 0) { //tijdens opzoeken edges om NOODSTOP mogelijk te maken.
-		//	MOTOR(true, false); //toggle motor aan of uit, Noodstop
-		//	return; //verlaat void
-		//}
-		//Serial.println("j");
 		PRG_level++;
 		DSP_prg();
 		break;
@@ -1500,6 +1406,7 @@ void ET_rq() {
 		}
 	}
 }
+
 void RUN_rq() {
 	if (GPIOR0 & (1 << 5)) { //motor draait
 		if (~GPIOR0 & (1 << 6)) { //iets met afremmen?
@@ -1518,7 +1425,8 @@ void RUN_rq() {
 			start();
 		}
 		else {
-			PORTD |= (1 << 4); //vrij geven
+			//Serial.println("Run_rq");
+			PORTD |= (1 << 4); //vrij geven portdhoog
 		}
 	} //	if (GPIOR0 & (1 << 5)) { //motor draait
 }
@@ -1561,7 +1469,6 @@ void RUN_rq_M() { //called from et_rq (stops_rq==stopscurrent komt niet voor)
 
 	if (bekend) {
 		runfase = 20; //zie MA_changed()
-		//Serial.print(F("bekend"));
 		if (GPIOR0 & (1 << 1)) { //richting up
 			POS = 0;
 			POS_rq = dist;
@@ -1574,7 +1481,6 @@ void RUN_rq_M() { //called from et_rq (stops_rq==stopscurrent komt niet voor)
 	}
 	else { //niet bekend
 		runfase = 0;
-		//Serial.println(F("run_rq niet bekend"));
 		OCR2A = Vhome;
 		startmotor();
 	}
@@ -1703,42 +1609,25 @@ void SW_encoder(boolean dir) {
 	}
 }
 void lock() {
-	//Serial.println(F("Lock"));
-	//doet alles om de brug te vergrendelen en vrij te geven voor een nieuwe draaiopdracht gebruik
-	//voorlopig alleen groene ledje op PIN4
-	//issue na noodstop BINNEN een melder mag brug niet vrij worden gegeven
-	//eventueel automatisch verplaatsen? kan hier ook maar voorlopig alleen led niet vrijgeven
+	//Serial.println("L"); //25okt
 	stops_current = melderadres - 1;
-	//Na een noodstop wordt bit4 van GPIOR1 gezet zodat Niet de brug wordt vergrendelt.
-
-
-	//dit lijkt me niet juist, heeft meer aandacht nodig
-	// vergrendeling en vrijgeven alleen als zeker is dat juiste positie is bereikt.
-	//na noodstop of opstarten in een stop is dat niet gegarandeerd
-	//bij opstarten in een station is dus misschien een opstart procedure nodig,
-	//twee keer edge draaien en stoppunt zoeken en daarna grendel derop.
-	if (~GPIOR1 & (1 << 4)) PORTD |= (1 << 4); //lock bridge on, NOT after noodstop, 
-	//of power-up in een station, dus geen draai gemaakt.
-	//vergrendeling moet dan niks doen, niet vergrendelen en niet vrij maken. 
-	//hier moeten we nog iets voor verzinnen. Zo ist niet goed genoeg...
-	//eerst grendel maken 
-
-	GPIOR1 &= ~(1 << 4); //reset noodstop flag
-
-
+	//if (~GPIOR1 & (1 << 4)) { //bug25okt
+		PORTD |= (1 << 4); //Lock pin hoog 
+		//Serial.println("G"); //25okt
+	//}
+	//GPIOR1 &= ~(1 << 4); //reset noodstop flag
 	runfase = 0;
 
 	if (~MEM_reg & (1 << 2)) { //motor uit in stop
-		//Serial.println(F("uit"));
 		GPIOR2 |= (1 << 2); //zet timer aan, timer zet motor uit na 2 seconde in Loop()
 		runwait = millis();
 	}
 }
 void free() {
 	//Maakt de brug vrij om te kunnen draaien
-	GPIOR0 |= (1 << 3);// flag voor motor enabled
+	GPIOR0 |= (1 << 3);// flag voor motor enabled V5.02
 	PORTB &= ~(1 << 1);// enable motor
-	PORTD &= ~(1 << 4); //groene led, lock low
+	PORTD &= ~(1 << 4); //groene led, lock low  portdlaag
 
 }
 void ENC_fine(boolean dir) {
@@ -1767,22 +1656,21 @@ void ENC_select(boolean dir) {
 }
 void loop() {
 	Dcc.process();
-	slowcount++;//Counter voor langzame processen 1xin 255 cycli
 
-	if (slowcount > 1000) { //V3.00 snelheid van lezen en uitvoeren 
-		slowcount = 0;
+	GPIOR2 ^= (1 << 7); //flip counter
+	if (GPIOR2 & (1 << 7)) slowcount++;//Counter voor langzame processen 1xin 512 cycli
+	//timing hier is tricky, werking switches en encoder 
+
+	if (slowcount == 0) { //V5.02 op 500, balans tussen bouncing switches of encoder goed werken
+		//slowcount = 0;
 
 		if ((GPIOR0 & (1 << 5)) && (GPIOR0 & (1 << 4)))FAST(); //versnellen
 		if (GPIOR1 & (1 << 1))SLOW(); //vertragen
-
-
 		count++;
 		if (count == 0) {
 			if (GPIOR0 & (1 << 6))RUN_rq();
 			if (COM_reg & (1 << 0))ET_rq();
 		}
-
-
 		//Acties uit ISR2 TIMER 
 		if (GPIOR1 & (1 << 7)) {
 			GPIOR1 &= ~(1 << 7); //reset flag
@@ -1795,12 +1683,11 @@ void loop() {
 			GPIOR2 &= ~(1 << 0); //reset flag
 			lock(); //
 		}
-
 		//timer  voor uitschakelen motor in lock na periode  OPM.runwait wordt ook in et_rq() gebruikt
 		if (GPIOR2 & (1 << 2)) {
 			if (millis() - runwait > 2000) { //timer 2 seconden
 				GPIOR2 &= ~(1 << 2);
-				GPIOR0 &= ~(1 << 3); //Motor enabled flag clear
+				GPIOR0 &= ~(1 << 3); //Motor enabled flag clear V5.02
 				PORTB |= (1 << 1); //disable motor
 				DSP_exe(12);
 			}

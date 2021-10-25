@@ -19,7 +19,7 @@ GPIOR0
 bit0 init ok false nulpunt bepaald, true nulpunt, home zoeken 
 bit1 direction
 bit2 request start 
-bit3 flag motor aan of uit, schakeld motor vrij disabled, true is aan enabled
+bit3 True: motor draai, false: motor draait niet
 bit4 versnellen true, vertragen false
 bit5 motor draaid true, false niet
 bit6 systeem, afremmen bij verandering terwijl draaid, actief =true
@@ -30,7 +30,7 @@ bit0 timer versnellen vertragen
 bit1 in Loop call and reset in SLOW(), set in ISR timer 2
 bit2 Bij opstarten (setup) en sw_melderadres, flag als true eerst een change in melderstatus, daarna motor()
 bit3 bij POS==POS_rq; als true stoppen, als false volgende POS_rq instellen
-bit4 Na noodstop in melder, brug NIET vrijgeven tot er een nieuwe stops is bereikt
+bit4 25okt V5.2   weer vrij (Na noodstop in melder, brug NIET vrijgeven tot er een nieuwe stops is bereikt)
 bit 5 sw_read pulserend uitvoeren, telkens een pauze nemen, dus lees puls versmallen
 bit6 false switches enabled, true switches disabled, voorkomt draai request waar dat niet mag (tijdens draaien en noodstop)
 bit7 flag temp ISR naar display (Minimaal code uitvoeren in ISR)
@@ -43,7 +43,7 @@ bit3 draai15 flag, direct of counter spoor (tegenoverliggend spoor)
 bit4 draai15 flag, enbale 180 graden turn true ()disable false
 bit5 
 bit6
-bit7
+bit7 xtra counter teller om slow events x2 te doen
 
 MEM_reg 
 bit0  Positie met  false=Home  true=melders (default)

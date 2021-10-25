@@ -636,6 +636,7 @@ void MOTOR(boolean offon) {
 
 	if (~GPIOR0 & (1 << 3)) { //Motor uit
 		PORTB |= (1 << 1); //disable motor, ENA van motor driver
+
 		PORTD &= ~(1 << 4); //lock, vergrendeling los maken
 		stop();
 		DSP_exe(20);
@@ -1155,7 +1156,7 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 		switchstatus[switchcount] = sr;
 
 		if (MEM_reg & (1 << 0)) { //als positie met melders
-			//if (GPIOR1 & (1 << 2)) SW_melderadres();
+			if (GPIOR1 & (1 << 2)) SW_melderadres(); //25okt
 			if (changed > 0 && switchcount == 1)SW_melderadres(); //melders veranderd
 		}
 
