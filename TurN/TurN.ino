@@ -25,25 +25,25 @@ Versie V5.1 overgegaan op NmraDcc library als decoder
 
 14 okt 2021 V5.02
 Ernstige bug (hopelijk) opgelost.
-In SW_melderadres, Melder wordt nu 4x achter elkaar gelezen om bouncen en na elkaar van de adres bits te ondervangen.
+In SW_melderadres, Melder wordt nu 2x achter elkaar gelezen om bouncen en na elkaar van de adres bits te ondervangen.
 23okt2021
-bug25okt het hoogzetten van pin 4 portd4 doen ook na noodstop bit4 van gpior1 komt daarmee weer als 
+bug25okt het hoogzetten van pin 4 portd4 doen ook na noodstop bit4 van gpior1 komt daarmee weer als
 niet in gebruik
-
+bug m26okt COM_reg weggehaald
+bug rw26okt runwait als byte spaart misschien 2 bytes, maar kan alleen via een xtra second byte en second counter
+bug cm26okt melder lezing naar 2 teruggebracht met een bit in GPIOR2 bit5
 
 
 */
 
-
 #include <EEPROM.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <splash.h>
+//#include <Adafruit_GFX.h>
+//#include <splash.h>
 #include <Adafruit_SSD1306.h>
 
 #include <NmraDcc.h>
 NmraDcc  Dcc;
-
 
 #define version "V5.02"
 
@@ -63,14 +63,14 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1); //constructor display
 
 byte DCC_adres;
 byte DCC_mode; //EEPROM 
-byte COM_reg;
+//byte COM_reg; //m26okt
 byte MEM_reg;
 byte slowcount; //was een byte
 
 //kunnen dit geen ints worden????
 long POS;
 long POS_rq;
-long POS_acc; //aantal stappen tussen afrem posities
+int POS_acc; //aantal stappen tussen afrem posities m26okt was een long 
 long POS_calc; //afrem positie
 
 struct stop
@@ -78,7 +78,7 @@ struct stop
 	//kunnen pos en width geen int of bytes worden? misschien met een berekende factor?
 	long pos; //(melders)Afstand naar Volgende stop. (Home)stopplek
 	int width; //(melders)afstand tussen de twee melder edges
-	int16_t fine; //afwijking middenount tussen edges
+	int fine; //afwijking middenpunt moet een signed int zijn pos en neg mogelijk
 	byte reg; //register
 	//bit 1 afstand naar volgende bovenliggende stop gemeten
 	//bit 2 width, breedte tussen melder edges gemeten
@@ -86,8 +86,8 @@ struct stop
 struct stop stops[16]; //melder met adres 1 is stops[0]
 
 byte aantalStops;
-byte lastup = 0;
-byte lastdown = 0;
+//byte lastup = 0; m26okt wordt niet gebruikt
+//byte lastdown = 0; m26okt niet in gebruikt
 byte stops_rq;
 byte stops_current;//V3.00 holds the current stop
 byte switchstatus[3];
@@ -103,14 +103,16 @@ byte Vmin;
 byte Vmax;
 byte Vstep; //instelling prescaler 64;128;259;1024
 byte count;
-byte startcount;
-byte melderold; byte meldercount = 0; //misschien zijn counters dubbel te gebruiken?
+//byte startcount; m26okt wordt niet gebruikt
+byte oldmelder;// cm26okt byte meldercount = 0; //misschien zijn counters dubbel te gebruiken?
 byte speling;//speling of vrije slag in de aandrijving max 255
 byte draai15;
 byte dr15pos; //current position in draai15
 byte dr15ads; //draai15 aantal tegenover liggende sporen (koploper, Itrain)
 
-unsigned long runwait;
+
+//byte seconds
+unsigned long runwait; //rw6okt runwait as bytex1000
 byte Vaccel = 3; //ingestelde acceleratietijd in seconden
 float accStep; //berekende tijd per snelheids step in microsec
 float puls;
@@ -183,7 +185,6 @@ void setup() {
 	switchcount = 2; //Eerst geteste switchcount nu 0 (switches) 
 
 	MEM_read();
-
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen
 		//MOTOR() called from sw_melderadres() nadat 1x demelderadressen zijn getoetst.
@@ -317,44 +318,44 @@ byte dr15() {
 }
 void start() {
 	//Serial.println(GPIOR0, BIN);
-	//PORTD &= ~(1 << 4); //free lock V5.02 weggehaald
-	//if (GPIOR0 & (1 << 3)) { //motor aan weggehaald V5.02, only called als motor aan is
+	PORTD &= ~(1 << 4); //free lock V5.02 weggehaald 26okt
+	if (GPIOR0 & (1 << 3)) { //motor aan weggehaald V5.02, only called als motor aan is
 
-	if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
-		if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
-		GPIOR0 |= (1 << 4); //versnellen	
-		//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
-		//aantal steps berekenen
-		POS_acc = 0;
-		for (byte i = Vmax; i <= Vmin; i++) {
-			//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
-			//accStep duur van 1 snelheidstap in milisec from MEM_read()
-			POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+		if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
+			if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
+			GPIOR0 |= (1 << 4); //versnellen	
+			//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
+			//aantal steps berekenen
+			POS_acc = 0;
+			for (byte i = Vmax; i <= Vmin; i++) {
+				//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
+				//accStep duur van 1 snelheidstap in milisec from MEM_read()
+				POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+			}
+			//richting en POS_calc instellen
+			if (GPIOR0 & (1 << 1)) { //up
+				if ((POS_rq - POS) / 2 <= POS_acc) {
+					POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
+				}
+				else {
+					POS_calc = POS_rq - POS_acc;
+				}
+			}
+			else { //down
+				if ((POS - POS_rq) / 2 <= POS_acc) {
+					POS_calc = POS_rq + ((POS - POS_rq) / 2);
+				}
+				else {
+					POS_calc = POS_rq + POS_acc;
+				}
+			}
 		}
-		//richting en POS_calc instellen
-		if (GPIOR0 & (1 << 1)) { //up
-			if ((POS_rq - POS) / 2 <= POS_acc) {
-				POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
-			}
-			else {
-				POS_calc = POS_rq - POS_acc;
-			}
-		}
-		else { //down
-			if ((POS - POS_rq) / 2 <= POS_acc) {
-				POS_calc = POS_rq + ((POS - POS_rq) / 2);
-			}
-			else {
-				POS_calc = POS_rq + POS_acc;
-			}
-		}
-	}
-	else {
-		OCR2A = Vhome;
-	} //going home, searching stop
+		else {
+			OCR2A = Vhome;
+		} //going home, searching stop
 
-	startmotor();
-	//} //V5.02
+		startmotor();
+	} //V5.02
 }
 void startmotor() {
 	//Serial.println("sm"); //25okt
@@ -520,9 +521,6 @@ void FACTORY() {
 	}
 }
 void MEM_read() {
-	//instellingen voor een draaischijf zonder vertraging
-	//snelheden worden als 255-Vsnelheid getoond
-
 	MEM_reg = EEPROM.read(102);
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 50;
@@ -902,8 +900,7 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 	} //GPIOR1
 }
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
-	//meldercount
-	//melderold
+
 	melderadres = 0; bool meldervalid = false;
 	for (byte i = 0; i < 4; i++) {
 		if (~switchstatus[1] & (1 << i)) {
@@ -924,17 +921,18 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		}
 	}
 
-	//vanaf V5.02 melders moeten 4x goed worden gemeten voordat ze worden als valid worden gezien
-	//nodig omdat niet altijd het adres precies gelijk op de melderpoorten komt.
-	if (melderold == melderadres) {
-		meldercount++;
-		if (meldercount > 3) {
+	//vanaf V5.02 melders moeten 2x goed worden gemeten voordat ze worden als valid worden gezien
+	//nodig omdat niet altijd het adres precies gelijk op de melderpoorten komt. 
+	
+	if (oldmelder == melderadres) {	//mc26okt
+		if (GPIOR2 & (1<<5)) {
 			meldervalid = true;
 		}
+		GPIOR2 &= ~(1 << 5); //reset flag count
 	}
 	else {
-		melderold = melderadres;
-		meldercount = 0;
+		oldmelder = melderadres;
+		GPIOR2 |= (1 << 5);
 		meldervalid = false;
 	}
 
@@ -1041,7 +1039,7 @@ void MA_changed() {
 	}
 }
 void F_width(byte stp, boolean splng) { //breedte van een melder bepaald
-	stops[stp].reg &= ~(1 << 1);
+	stops[stp].reg &= ~(1 << 1); //sr26okt
 	stops[stp].width = abs(POS); //altijd een positieve waarde
 	if (stp == stops_rq) {
 		GPIOR0 &= ~(1 << 5); //Flag motor draait niet
@@ -1080,7 +1078,7 @@ long calcPos(byte stp, boolean updown) {
 	return result;
 }
 void F_pos(byte stp) {
-	stops[stp].reg &= ~(1 << 2);
+	stops[stp].reg &= ~(1 << 2); //sr26okt
 	stops[stp].pos = abs(POS); // Altijd positief waarde
 }
 void SW_off(byte sw) {
@@ -1389,12 +1387,17 @@ void ET_rq() {
 	//PORTD &= ~(1 << 4); //free lock at new position request
 	free(); //V3.00
 
-	if (~COM_reg & (1 << 0)) {
-		COM_reg |= ((1 << 0));
-		runwait = millis();
+	//if (~COM_reg & (1 << 0)) {
+	//	COM_reg |= ((1 << 0));
+		if (~GPIOR2 & (1 << 6)) {
+		GPIOR2 |= ((1 << 6)); //m26okt
+
+
+		runwait = millis(); //rw26okt
 	}
 	else {
-		if (millis() - runwait > 3000) {
+			
+		if (millis() - runwait > 6000) { //rw26okt
 			if (MEM_reg & (1 << 0)) { //melders-mode
 				if (stops_current != stops_rq)RUN_rq_M();
 			}
@@ -1402,7 +1405,8 @@ void ET_rq() {
 				POS_rq = stops[stops_rq].pos;
 				RUN_rq();
 			}
-			COM_reg &= ~(1 << 0);
+			//COM_reg &= ~(1 << 0);
+			GPIOR2 &= ~(1 << 6); //m26okt
 		}
 	}
 }
@@ -1612,15 +1616,15 @@ void lock() {
 	//Serial.println("L"); //25okt
 	stops_current = melderadres - 1;
 	//if (~GPIOR1 & (1 << 4)) { //bug25okt
-		PORTD |= (1 << 4); //Lock pin hoog 
-		//Serial.println("G"); //25okt
-	//}
-	//GPIOR1 &= ~(1 << 4); //reset noodstop flag
+	PORTD |= (1 << 4); //Lock pin hoog 
+	//Serial.println("G"); //25okt
+//}
+//GPIOR1 &= ~(1 << 4); //reset noodstop flag
 	runfase = 0;
 
 	if (~MEM_reg & (1 << 2)) { //motor uit in stop
 		GPIOR2 |= (1 << 2); //zet timer aan, timer zet motor uit na 2 seconde in Loop()
-		runwait = millis();
+		runwait = millis(); //rw26okt
 	}
 }
 void free() {
@@ -1669,7 +1673,8 @@ void loop() {
 		count++;
 		if (count == 0) {
 			if (GPIOR0 & (1 << 6))RUN_rq();
-			if (COM_reg & (1 << 0))ET_rq();
+			//if (COM_reg & (1 << 0))ET_rq();
+			if (GPIOR2 & (1 << 6))ET_rq(); //26okt
 		}
 		//Acties uit ISR2 TIMER 
 		if (GPIOR1 & (1 << 7)) {
@@ -1685,14 +1690,13 @@ void loop() {
 		}
 		//timer  voor uitschakelen motor in lock na periode  OPM.runwait wordt ook in et_rq() gebruikt
 		if (GPIOR2 & (1 << 2)) {
-			if (millis() - runwait > 2000) { //timer 2 seconden
+			if (millis() - runwait > 3000) { //timer 2 seconden rw26okt
 				GPIOR2 &= ~(1 << 2);
 				GPIOR0 &= ~(1 << 3); //Motor enabled flag clear V5.02
 				PORTB |= (1 << 1); //disable motor
 				DSP_exe(12);
 			}
 		}
-
 		//Volgorde in LOOP is hier belangrijk, SW_read onderaan....
 		SW_read();
 	}
