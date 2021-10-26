@@ -32,7 +32,7 @@ niet in gebruik
 bug m26okt COM_reg weggehaald
 bug rw26okt runwait als byte spaart misschien 2 bytes, maar kan alleen via een xtra second byte en second counter
 bug cm26okt melder lezing naar 2 teruggebracht met een bit in GPIOR2 bit5
-
+bug sbug26okt onduidelijk issue in start, keuzes niet duidelijk komen niet voor
 
 */
 
@@ -318,8 +318,8 @@ byte dr15() {
 }
 void start() {
 	//Serial.println(GPIOR0, BIN);
-	PORTD &= ~(1 << 4); //free lock V5.02 weggehaald 26okt
-	if (GPIOR0 & (1 << 3)) { //motor aan weggehaald V5.02, only called als motor aan is
+	//PORTD &= ~(1 << 4); //free lock V5.02 weggehaald sbug26okt
+	//if (GPIOR0 & (1 << 3)) { //motor aan weggehaald V5.02, only called als motor aan is sbug26okt
 
 		if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
 			if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
@@ -355,7 +355,7 @@ void start() {
 		} //going home, searching stop
 
 		startmotor();
-	} //V5.02
+	//} //V5.02  sbug26okt
 }
 void startmotor() {
 	//Serial.println("sm"); //25okt
