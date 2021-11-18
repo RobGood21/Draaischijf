@@ -34,6 +34,11 @@ bug rw26okt runwait als byte spaart misschien 2 bytes, maar kan alleen via een x
 bug cm26okt melder lezing naar 2 teruggebracht met een bit in GPIOR2 bit5
 bug sbug26okt onduidelijk issue in start, keuzes niet duidelijk komen niet voor
 
+18nov2021 V5.03 
+Bug18nov doordat de 'lezing van melders" verdubbelt is in versie V5.02 start de motor niet als niet in een station in melderm
+mode, dit verholpen op regel 946
+
+
 */
 
 #include <EEPROM.h>
@@ -185,6 +190,7 @@ void setup() {
 	switchcount = 2; //Eerst geteste switchcount nu 0 (switches) 
 
 	MEM_read();
+
 	//nodig voor opstart procedure
 	if (MEM_reg & (1 << 0)) { //melder mode eerst 1x melderadres bepalen
 		//MOTOR() called from sw_melderadres() nadat 1x demelderadressen zijn getoetst.
@@ -321,40 +327,40 @@ void start() {
 	//PORTD &= ~(1 << 4); //free lock V5.02 weggehaald sbug26okt
 	//if (GPIOR0 & (1 << 3)) { //motor aan weggehaald V5.02, only called als motor aan is sbug26okt
 
-		if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
-			if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
-			GPIOR0 |= (1 << 4); //versnellen	
-			//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
-			//aantal steps berekenen
-			POS_acc = 0;
-			for (byte i = Vmax; i <= Vmin; i++) {
-				//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
-				//accStep duur van 1 snelheidstap in milisec from MEM_read()
-				POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+	if (~GPIOR0 & (1 << 0)) { //GPIOR0 bit0 true =homing. Positie zoeken
+		if (PRG_fase == 0) OCR2A = Vmin; //instellen startsnelheid
+		GPIOR0 |= (1 << 4); //versnellen	
+		//bereken afremmoment POS_acc is afremafstand totaal, POS_calc is afrempositie
+		//aantal steps berekenen
+		POS_acc = 0;
+		for (byte i = Vmax; i <= Vmin; i++) {
+			//steptijd/prescaler * clk(0.000.000.00625*i = aantal steps op deze snelheid
+			//accStep duur van 1 snelheidstap in milisec from MEM_read()
+			POS_acc = POS_acc + (accStep * 1000) / (puls*i);
+		}
+		//richting en POS_calc instellen
+		if (GPIOR0 & (1 << 1)) { //up
+			if ((POS_rq - POS) / 2 <= POS_acc) {
+				POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
 			}
-			//richting en POS_calc instellen
-			if (GPIOR0 & (1 << 1)) { //up
-				if ((POS_rq - POS) / 2 <= POS_acc) {
-					POS_calc = POS_rq - ((POS_rq - POS) / 2); //halverwege tussen POS en POS_rq
-				}
-				else {
-					POS_calc = POS_rq - POS_acc;
-				}
-			}
-			else { //down
-				if ((POS - POS_rq) / 2 <= POS_acc) {
-					POS_calc = POS_rq + ((POS - POS_rq) / 2);
-				}
-				else {
-					POS_calc = POS_rq + POS_acc;
-				}
+			else {
+				POS_calc = POS_rq - POS_acc;
 			}
 		}
-		else {
-			OCR2A = Vhome;
-		} //going home, searching stop
+		else { //down
+			if ((POS - POS_rq) / 2 <= POS_acc) {
+				POS_calc = POS_rq + ((POS - POS_rq) / 2);
+			}
+			else {
+				POS_calc = POS_rq + POS_acc;
+			}
+		}
+	}
+	else {
+		OCR2A = Vhome;
+	} //going home, searching stop
 
-		startmotor();
+	startmotor();
 	//} //V5.02  sbug26okt
 }
 void startmotor() {
@@ -900,7 +906,6 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 	} //GPIOR1
 }
 void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-melders) and melderstatus changed
-
 	melderadres = 0; bool meldervalid = false;
 	for (byte i = 0; i < 4; i++) {
 		if (~switchstatus[1] & (1 << i)) {
@@ -923,9 +928,9 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 
 	//vanaf V5.02 melders moeten 2x goed worden gemeten voordat ze worden als valid worden gezien
 	//nodig omdat niet altijd het adres precies gelijk op de melderpoorten komt. 
-	
+
 	if (oldmelder == melderadres) {	//mc26okt
-		if (GPIOR2 & (1<<5)) {
+		if (GPIOR2 & (1 << 5)) {
 			meldervalid = true;
 		}
 		GPIOR2 &= ~(1 << 5); //reset flag count
@@ -938,11 +943,13 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 
 	if (!meldervalid) { //geen geldig melderadres
 		switchstatus[1] = 0xFF; //genereerd direct nieuwe melder uitlezing
-		return;
+		if(~GPIOR1 & (1<<2)) return;  //bug18nov20211
 	}
 
-
+	//if (GPIOR1 & (1 << 2))Serial.println("top");
+	
 	if (GPIOR1 & (1 << 2)) { //set in setup
+		//Serial.println("jo");
 		GPIOR1 &= ~(1 << 2);
 		MOTOR(true);
 	}
@@ -954,6 +961,8 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 		DSP_exe(12);
 		melderOld = melderadres;
 	}
+
+
 	melderTemp = melderadres;
 }
 void MA_changed() {
@@ -1389,14 +1398,14 @@ void ET_rq() {
 
 	//if (~COM_reg & (1 << 0)) {
 	//	COM_reg |= ((1 << 0));
-		if (~GPIOR2 & (1 << 6)) {
+	if (~GPIOR2 & (1 << 6)) {
 		GPIOR2 |= ((1 << 6)); //m26okt
 
 
 		runwait = millis(); //rw26okt
 	}
 	else {
-			
+
 		if (millis() - runwait > 6000) { //rw26okt
 			if (MEM_reg & (1 << 0)) { //melders-mode
 				if (stops_current != stops_rq)RUN_rq_M();
