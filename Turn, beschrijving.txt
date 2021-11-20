@@ -14,6 +14,10 @@ DCC modes (tonen +1)
 3=Draai15
 Opmerking: Programma automatisch op DRAAISCHIJF mode zetten als draai15 wordt gekozen. 
 
+COM_reg
+
+
+
 
 GPIOR0
 bit0 init ok false nulpunt bepaald, true nulpunt, home zoeken 
@@ -49,7 +53,9 @@ MEM_reg
 bit0  Positie met  false=Home  true=melders (default)
 bit1 Type encoder richting 
 bit2 Motor off false motor stroomloos als stop is bereikt. True is motor altijd aan laten (default)
-
+...
+bit6 knop1 functie richting parameter up of down
+bit7 knop1 is ingedrukt (na knop0 die reset dit bit)
 
 EEPROM
 100 spotstatus

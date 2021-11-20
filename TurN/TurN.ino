@@ -34,10 +34,11 @@ bug rw26okt runwait als byte spaart misschien 2 bytes, maar kan alleen via een x
 bug cm26okt melder lezing naar 2 teruggebracht met een bit in GPIOR2 bit5
 bug sbug26okt onduidelijk issue in start, keuzes niet duidelijk komen niet voor
 
-18nov2021 V5.03 
+18nov2021 V5.03
 Bug18nov doordat de 'lezing van melders" verdubbelt is in versie V5.02 start de motor niet als niet in een station in melderm
 mode, dit verholpen op regel 946
-
+bug19nov prglevel naar 0 bij iedere opschakeling van Prgfase
+bug20nov parameter in byte waardes omhoog en omlaag mogelijk
 
 */
 
@@ -50,7 +51,7 @@ mode, dit verholpen op regel 946
 #include <NmraDcc.h>
 NmraDcc  Dcc;
 
-#define version "V5.02"
+#define version "V5.03"
 
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
@@ -538,7 +539,7 @@ void MEM_read() {
 	if (Vstep > 3) Vstep = 3; //TurN 3, Treinlift 1
 
 	aantalStops = EEPROM.read(114);
-	if (aantalStops > 16)aantalStops = 4; //testen V3.0 moet zijn 8
+	if (aantalStops > 15)aantalStops = 4; //testen V3.0 moet zijn 8; bugs19nov aantalstops 15
 
 	Vaccel = EEPROM.read(115);
 	if (Vaccel > 10)Vaccel = 8;
@@ -882,7 +883,6 @@ void SW_read() { //lezen van schakelaars, called from loop and setup, before mot
 		//	sr = PINC;
 		sr = PINC << 4;
 		sr = sr >> 4;
-		//	sr |=(B11110000);
 
 		changed = sr ^ switchstatus[switchcount];
 		for (byte i = 0; i < 4; i++) {
@@ -943,11 +943,11 @@ void SW_melderadres() { //called from sw_read if MEM_reg bit 0 is true (mode-mel
 
 	if (!meldervalid) { //geen geldig melderadres
 		switchstatus[1] = 0xFF; //genereerd direct nieuwe melder uitlezing
-		if(~GPIOR1 & (1<<2)) return;  //bug18nov20211
+		if (~GPIOR1 & (1 << 2)) return;  //bug18nov20211
 	}
 
 	//if (GPIOR1 & (1 << 2))Serial.println("top");
-	
+
 	if (GPIOR1 & (1 << 2)) { //set in setup
 		//Serial.println("jo");
 		GPIOR1 &= ~(1 << 2);
@@ -1234,7 +1234,14 @@ void SW_0(boolean onoff) { //up
 			break;
 
 		case 3: //Instellingen met byte waardes
-			PRG_level++;
+			if (MEM_reg & (1<<7)) { //bug20nov
+				MEM_reg ^= (1 << 6); //flip richting parameter waarde
+				MEM_reg &=~(1 << 7); //reset flag knop1 ingedrukt
+			}
+			else {
+				PRG_level++;
+			}
+
 			if (PRG_level > 8)PRG_level = 0;
 			DSP_exe(40);
 			break;
@@ -1302,7 +1309,9 @@ void SW_1(boolean onoff) { //down
 			break;
 
 		case 3: //instellingen
-			SW_encoder(false);
+			MEM_reg |= (1 << 7); //bug20nov, flag button parameter pressed
+			SW_encoder(MEM_reg & (1 << 6)); // omhoog of omlaag
+			//SW_encoder(false);
 
 			break;
 		case 4: //modes boolean MEM_reg 0=positie met 			
@@ -1380,9 +1389,9 @@ void SW_3() {
 	//if (~GPIOR0 & (1 << 5)) { //switch enabled, blocked als motor draait
 	//tijdens positie testen ff uit
 		PRG_fase++;
+		PRG_level = 0;  //bug19nov
 		if (PRG_fase > 5)PRG_fase = 0;
 		DSP_prg();
-		PRG_level = 0;
 
 		if (PRG_fase > 0) {
 			free(); //Stel brug als bezet, groene led uit
@@ -1550,7 +1559,7 @@ void SW_encoder(boolean dir) {
 				break;
 			case 5: //aantal stops
 				aantalStops--;
-				if (aantalStops < 1) aantalStops = 16;
+				if (aantalStops < 1) aantalStops = 15;
 				break;
 			case 6: //DCC modi
 				DCC_mode--;
@@ -1585,7 +1594,7 @@ void SW_encoder(boolean dir) {
 				break;
 			case 5: //
 				aantalStops++;
-				if (aantalStops > 16)aantalStops = 1;
+				if (aantalStops > 15)aantalStops = 1;
 				break;
 			case 6: //DCC modi
 				DCC_mode++;
