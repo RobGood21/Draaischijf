@@ -529,6 +529,7 @@ void FACTORY() {
 }
 void MEM_read() {
 	MEM_reg = EEPROM.read(102);
+
 	Vhome = EEPROM.read(110);
 	if (Vhome == 0xFF)Vhome = 50;
 	Vmin = EEPROM.read(111);
@@ -1428,7 +1429,6 @@ void ET_rq() {
 		}
 	}
 }
-
 void RUN_rq() {
 	if (GPIOR0 & (1 << 5)) { //motor draait
 		if (~GPIOR0 & (1 << 6)) { //iets met afremmen?
@@ -1602,7 +1602,7 @@ void SW_encoder(boolean dir) {
 				break;
 			case 7: //in draai15 mode aantal 'overkant' sporen
 				dr15ads++;
-				if (dr15ads > 8)dr15ads = 0;
+				if (dr15ads > 15)dr15ads = 0;
 				break;
 			case 8: //speling, vrije slag
 				if (speling < 254)speling++;
